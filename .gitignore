@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment Variables
+.env
+.env.local
+
+# Database
+mysql/
+
+# Uploads & Media
+uploads
+video/
+*.mp4
+*.avi
+*.mov
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archives
+*.zip
+*.tar.gz
+
+# Model Files (large)
+# yolov8n-pose.pt  # 如果模型文件很大，可以取消注释
+
+# Temporary
+*.tmp
+*.bak
+.pytest_cache/
+tools/PEYOLO/ffmpeg-master-latest-win64-gpl-shared/
+
+
+tools/PEYOLO/ffmpeg-master-latest-win64-gpl-shared/
+

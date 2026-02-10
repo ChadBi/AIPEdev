@@ -1,0 +1,7 @@
+{
+  "name": "AI Sports Coach - 智能体育教学系统",
+  "description": "An AI-powered sports teaching and assessment platform that uses pose estimation to evaluate athlete performance and provide feedback.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
