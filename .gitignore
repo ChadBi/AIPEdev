@@ -106,3 +106,19 @@ tools/PEYOLO/
 *.onnx
 *.h5
 model_weights/
+
+# --- 新增条目 (2024) ---
+
+# Audio Files
+*.mp3
+*.wav
+*.ogg
+*.flac
+uploads/music/
+
+# Claude Code
+.claude/
+
+# Task & Test Files
+ai_wrok/
+test_*.py

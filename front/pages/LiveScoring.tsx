@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { getVideoWithSync, getSyncConfig } from '../api/sync';
-import { getMusicList, getMusicUrl } from '../api/music';
-import { VideoWithSync, Music, CameraDevice, LiveStats } from '../types';
-import { getVideoUrl } from '../api';
+import { getVideoWithSync } from '../api/sync';
+import { getMusicList } from '../api/music';
+import { VideoWithSync, Music, LiveStats } from '../types';
 import CameraSelector from '../components/CameraSelector';
 import LiveVideoPanel from '../components/LiveVideoPanel';
 import MusicPlayerBar from '../components/MusicPlayerBar';
@@ -11,8 +10,6 @@ import {
   Play,
   Pause,
   Square,
-  Settings,
-  ChevronRight,
   Clock,
   Target,
   Zap,
@@ -54,10 +51,8 @@ const LiveScoring: React.FC = () => {
   const [warning, setWarning] = useState('');
 
   // Refs
-  const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const frameLoopRef = useRef<number>();
-  const statsLoopRef = useRef<number>();
   const startTimeRef = useRef<number>(0);
 
   // 加载视频和音乐数据

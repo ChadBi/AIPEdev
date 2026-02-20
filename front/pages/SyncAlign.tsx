@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { syncAlign, getSyncConfig, getVideoWithSync, getMusicList } from '../api/sync';
-import { getMusicUrl } from '../api/music';
+import { syncAlign, getVideoWithSync, getMusicList } from '../api/sync';
 import { VideoWithSync, Music } from '../types';
 import api, { getVideoUrl } from '../api';
 import {
@@ -10,7 +9,6 @@ import {
   Volume2,
   VolumeX,
   Save,
-  ChevronRight,
   ArrowLeft,
   Clock,
   AlertCircle,

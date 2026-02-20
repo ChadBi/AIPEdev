@@ -1,4 +1,4 @@
-import api, { getVideoUrl } from '../api';
+import api from '../api';
 
 // 音乐相关 API
 

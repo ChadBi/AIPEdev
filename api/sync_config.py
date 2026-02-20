@@ -4,8 +4,6 @@ from sqlalchemy.orm import Session
 from core.database import get_db
 from core.deps import get_current_user
 from models.user import User
-from models.video import Video
-from models.music import Music
 from schemas.sync_config import (
     SyncConfigCreate,
     SyncConfigUpdate,

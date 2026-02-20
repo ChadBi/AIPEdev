@@ -121,7 +121,7 @@ const LiveVideoPanel: React.FC<LiveVideoPanelProps> = ({
     });
 
     // 绘制关键点
-    KEYPOINT_NAMES.forEach((name, index) => {
+    KEYPOINT_NAMES.forEach((name) => {
       const kp = keypoints[name];
       if (kp && kp[2] > 0.3) {
         ctx.beginPath();

@@ -1,4 +1,4 @@
-import api, { getVideoUrl } from '../api';
+import api from '../api';
 import { VideoWithSync } from '../types';
 
 // 同步配置相关 API

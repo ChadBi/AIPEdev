@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 import shutil
 import os
 import uuid
-from pathlib import Path
 
 from core.database import get_db
 from core.deps import get_current_user
