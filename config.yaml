@@ -37,7 +37,7 @@ ai:
   # "0"        : 使用第一块 GPU (CUDA)
   # "cuda:0"   : 同上
   # "mps"      : MacOS GPU 加速
-  yolo_device: "cpu"
+  yolo_device: "cuda:0"
   
   # 抽帧采样率 (每秒采样帧数)
   # 该参数会根据视频 FPS 自动计算采样间隔

@@ -17,6 +17,9 @@ import ScoringPage from './pages/Scoring';
 import ScoreResult from './pages/ScoreResult';
 import ScoreHistory from './pages/ScoreHistory';
 import UserProfile from './pages/UserProfile';
+import MusicLibrary from './pages/MusicLibrary';
+import SyncAlign from './pages/SyncAlign';
+import LiveScoring from './pages/LiveScoring';
 import Layout from './components/Layout';
 
 // Auth Context
@@ -97,6 +100,9 @@ const App: React.FC = () => {
               <Route path="/scores" element={<ScoringPage />} />
               <Route path="/scores/result/:id" element={<ScoreResult />} />
               <Route path="/scores/history" element={<ScoreHistory />} />
+              <Route path="/scores/live" element={<LiveScoring />} />
+              <Route path="/music" element={<MusicLibrary />} />
+              <Route path="/sync/align" element={<SyncAlign />} />
               <Route path="/profile" element={<UserProfile />} />
               <Route path="/users/me" element={<UserProfile />} />
             </Route>

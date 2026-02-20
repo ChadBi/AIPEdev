@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from api import auth, user, action, video, recognize, score
+from api import auth, user, action, video, recognize, score, music, sync_config
+from api.websocket import router as ws_router, websocket_live_detection
 from core.config import UPLOAD_DIR
 import os
 
@@ -11,7 +12,7 @@ app = FastAPI(title="AI 体育教学后端系统")
 # ========= CORS 配置 =========
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -28,5 +29,11 @@ app.include_router(auth.router, prefix="/auth", tags=["认证模块"])
 app.include_router(user.router, prefix="/users", tags=["用户模块"])
 app.include_router(action.router, prefix="/actions", tags=["动作模块"])
 app.include_router(video.router, prefix="/videos", tags=["视频模块"])
+app.include_router(music.router, prefix="/music", tags=["音乐模块"])
+app.include_router(sync_config.router, prefix="/sync", tags=["同步配置模块"])
 app.include_router(recognize.router, prefix="/recognize", tags=["识别模块"])
 app.include_router(score.router, prefix="/scores", tags=["评分模块"])
+
+# WebSocket 路由直接添加到 app（不能用 include_router）
+# 实际端点: ws://host:port/ws/live/{video_id}
+app.add_api_websocket_route("/ws/live/{video_id}", websocket_live_detection)

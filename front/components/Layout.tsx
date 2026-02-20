@@ -2,18 +2,20 @@
 import React, { useState } from 'react';
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../App';
-import { 
-  LayoutDashboard, 
-  Library, 
-  Video, 
-  Target, 
-  History, 
-  User, 
-  LogOut, 
-  Menu, 
+import {
+  LayoutDashboard,
+  Library,
+  Video,
+  Target,
+  History,
+  User,
+  LogOut,
+  Menu,
   X,
   PlusCircle,
-  BarChart3
+  BarChart3,
+  Music,
+  Radio
 } from 'lucide-react';
 
 const Layout: React.FC = () => {
@@ -26,7 +28,9 @@ const Layout: React.FC = () => {
     { name: '仪表盘', path: '/dashboard', icon: LayoutDashboard },
     { name: '动作库', path: '/actions', icon: Library },
     { name: '视频管理', path: '/videos', icon: Video },
+    { name: '音乐库', path: '/music', icon: Music },
     { name: '开始评分', path: '/scores', icon: Target },
+    { name: '实时检测', path: '/scores/live', icon: Radio },
     { name: '评分历史', path: '/scores/history', icon: History },
   ];
 

@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Optional
+
 
 class VideoBase(BaseModel):
     """
@@ -11,13 +13,20 @@ class VideoBase(BaseModel):
     fps: int | None = None
     total_frames: int | None = None
 
+
 class VideoCreate(VideoBase):
     """
     创建视频记录请求模型
-
-    继承自 VideoBase，目前不需要额外字段。
     """
-    pass
+    music_id: Optional[int] = None
+
+
+class VideoUpdate(BaseModel):
+    """
+    更新视频记录请求模型
+    """
+    music_id: Optional[int] = None
+
 
 class VideoOut(VideoBase):
     """
@@ -27,8 +36,20 @@ class VideoOut(VideoBase):
     """
     id: int
     user_id: int
+    music_id: Optional[int] = None
+    sync_config_id: Optional[int] = None
     created_at: datetime
 
     class Config:
         # Pydantic V2 配置 (兼容 ORM 对象)
         from_attributes = True
+
+
+class VideoWithSyncOut(VideoOut):
+    """
+    包含同步配置信息的视频响应模型
+    """
+    music_name: Optional[str] = None
+    music_file_path: Optional[str] = None
+    sync_offset_ms: Optional[int] = None
+    is_aligned: Optional[bool] = False

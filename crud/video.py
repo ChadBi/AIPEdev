@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from models.video import Video
-from schemas.video import VideoCreate
+from schemas.video import VideoCreate, VideoUpdate
 
 def create_video(db: Session, video: VideoCreate, user_id: int) -> Video:
     """
@@ -8,6 +8,22 @@ def create_video(db: Session, video: VideoCreate, user_id: int) -> Video:
     """
     db_video = Video(**video.model_dump(), user_id=user_id)
     db.add(db_video)
+    db.commit()
+    db.refresh(db_video)
+    return db_video
+
+def update_video(db: Session, video_id: int, **kwargs) -> Video | None:
+    """
+    更新视频记录
+    """
+    db_video = get_video_by_id(db, video_id)
+    if not db_video:
+        return None
+
+    for key, value in kwargs.items():
+        if hasattr(db_video, key):
+            setattr(db_video, key, value)
+
     db.commit()
     db.refresh(db_video)
     return db_video
