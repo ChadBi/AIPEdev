@@ -298,4 +298,30 @@ React 使用 `key` 识别组件身份，即使位置和层级变化也会保留�
 
 ---
 
+## 2026-02-21 - 修复布局切换后视频引用丢失和摄像头流检测失败问题
+
+### 问题描述
+1. 用户可以看到实时画面说明摄像头连接正常
+2. 但切换到全屏模式后控制台显示 `视频未就绪: {readyState: 0, width: 0, height: 0, srcObject: false}`
+3. 点击开始检测后全屏模式没有弹出
+4. FPS 始终为 0
+
+### 问题原因
+1. **布局切换导致 video 元素重新创建**：虽然使用了 key，但 React 会重新创建 DOM 节点
+2. **ref 更新时机问题**：原 useEffect 依赖 `[stream, externalVideoRef]`，布局切换时两者都不变化，导致 useEffect 不重新执行
+3. **时序问题**：切换布局后立即启动帧循环，此时 liveVideoRef.current 还未指向新的 video 元素
+
+### 解决方案
+1. **使用 useLayoutEffect 同步 ref**：在每次 DOM 更新后立即同步，确保 ref 始终指向正确的元素
+2. **添加组件卸载清理**：避免引用过期或已被销毁的 video 元素
+3. **启动延迟**：增加 300ms 延迟，确保 LiveVideoPanel 完成挂载并设置 ref
+4. **增强就绪检查**：添加 `srcObject` 验证，确保 video 元素确实绑定到了流
+5. **详细调试日志**：添加关键节点日志，方便排查问题
+
+### 修改的文件
+- `front/components/LiveVideoPanel.tsx`
+- `front/pages/LiveScoring.tsx`
+
+---
+
 **最后更新**: 2026-02-21
