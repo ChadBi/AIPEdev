@@ -448,6 +448,9 @@ const LiveScoring: React.FC = () => {
     // 确保音频从头开始
     audio.currentTime = 0;
 
+    // 先设置 audioRef，再调用 playAudio
+    audioRef.current = audio;
+
     // 处理音乐对齐偏移
     if (offsetMs > 0) {
       // 视频比音乐晚（音乐先播放，音乐播放到偏移点时视频开始）
@@ -461,8 +464,6 @@ const LiveScoring: React.FC = () => {
       // 无偏移，同时播放
       playAudio();
     }
-
-    audioRef.current = audio;
   }, [playAudio, scheduleMusicPlay, selectedMusic, selectedSync?.sync_offset_ms, stats.music_volume]);
 
   const handleStart = useCallback(() => {
