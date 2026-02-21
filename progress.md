@@ -194,4 +194,26 @@ SyncAlign.tsx 页面加载时报错，显示 `setStandardKeypointsLoaded is not 
 
 ---
 
+## 2026-02-21 - 修正音乐对齐逻辑
+
+### 问题
+实时检测页面的音乐对齐逻辑与 SyncAlign 页面不一致，导致音乐和视频的播放时机不对。
+
+### 原因分析
+- **SyncAlign.tsx 逻辑（正确）**：音乐始终从 0 开始播放，视频根据 `videoOffsetMs` 延迟播放
+  - `videoOffsetMs > 0`：视频晚播（视频延迟 8.45 秒后才播放）
+  - 音乐立即从 0 开始播放
+
+- **LiveScoring.tsx 逻辑（错误）**：之前实现的是音乐延迟播放，与 SyncAlign 逻辑相反
+
+### 解决方案
+修正 LiveScoring.tsx 的逻辑，使其与 SyncAlign.tsx 保持一致：
+1. **音乐**：始终从头开始立即播放
+2. **视频**：根据 `sync_offset_ms` 延迟播放（若为正数）
+
+### 修改的文件
+- `front/pages/LiveScoring.tsx`
+
+---
+
 **最后更新**: 2026-02-21
