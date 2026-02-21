@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useLayoutEffect } from 'react';
 import { Keypoints } from '../types';
 
 interface LiveVideoPanelProps {
@@ -61,16 +61,31 @@ const LiveVideoPanel: React.FC<LiveVideoPanelProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // 确保外部引用始终指向正确的 video 元素
+  useLayoutEffect(() => {
+    const video = videoRef.current;
+    if (video && externalVideoRef) {
+      externalVideoRef.current = video;
+      console.log('[LiveVideoPanel] 同步 externalVideoRef - srcObject =', !!video.srcObject);
+    }
+  });
+
+  // 组件卸载时清空外部引用
+  useEffect(() => {
+    return () => {
+      if (externalVideoRef) {
+        externalVideoRef.current = null;
+        console.log('[LiveVideoPanel] 清空 externalVideoRef');
+      }
+    };
+  }, [externalVideoRef]);
+
   // 将视频流绑定到 video 元素
   useEffect(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
 
     if (!video || !canvas) return;
-
-    if (externalVideoRef) {
-      externalVideoRef.current = video;
-    }
 
     if (stream) {
       video.srcObject = stream;
@@ -97,7 +112,7 @@ const LiveVideoPanel: React.FC<LiveVideoPanelProps> = ({
       video.removeEventListener('loadedmetadata', updateCanvasSize);
       video.removeEventListener('resize', updateCanvasSize);
     };
-  }, [stream, externalVideoRef]);
+  }, [stream]);
 
   useEffect(() => {
     const video = videoRef.current;

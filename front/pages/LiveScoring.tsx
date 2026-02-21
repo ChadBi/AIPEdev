@@ -397,21 +397,24 @@ const LiveScoring: React.FC = () => {
         // 每秒只打印一次
         if (!window._debugLastLog || Date.now() - window._debugLastLog > 1000) {
           console.log('[帧发送] 视频引用不可用，liveVideoRef.current =', liveVideoRef.current);
-          console.log('[帧发送] 摄像头就绪状态:', cameraReady, '流存在:', !!stream);
+          console.log('[帧发送] 摄像头就绪状态:', cameraReady, '流存在:', !!stream, '全屏模式:', isFullscreenCompare);
           window._debugLastLog = Date.now();
         }
         return;
       }
 
       const liveVideo = liveVideoRef.current;
-      if (liveVideo.readyState < 2 || liveVideo.videoWidth === 0 || liveVideo.videoHeight === 0) {
+      if (liveVideo.readyState < 2 || liveVideo.videoWidth === 0 || liveVideo.videoHeight === 0 || !liveVideo.srcObject) {
         // 减少日志频率
         if (sentFramesRef.current === 0 || !window._debugVideoLog || Date.now() - window._debugVideoLog > 2000) {
           console.log('[帧发送] 视频未就绪:', {
             readyState: liveVideo.readyState,
             width: liveVideo.videoWidth,
             height: liveVideo.videoHeight,
-            srcObject: !!liveVideo.srcObject
+            srcObject: !!liveVideo.srcObject,
+            cameraReady,
+            streamExists: !!stream,
+            isFullscreenCompare
           });
           window._debugVideoLog = Date.now();
         }
@@ -553,38 +556,45 @@ const LiveScoring: React.FC = () => {
 
         // 短暂延迟后开始播放，确保媒体已加载
         setTimeout(() => {
-          const syncOffsetMs = selectedSync.sync_offset_ms || 0;
+          // 给足够时间让 LiveVideoPanel 完成挂载并设置 ref
+          setTimeout(() => {
+            const syncOffsetMs = selectedSync.sync_offset_ms || 0;
 
-          // 确保标准视频从头开始
-          if (standardVideoRef.current) {
-            const video = standardVideoRef.current;
-            video.pause();
-            video.currentTime = 0;
+            // 确保 standardVideoRef 也已正确设置
+            console.log('[handleStart] 开始启动 - liveVideoRef.current =', liveVideoRef.current);
+            console.log('[handleStart] standardVideoRef.current =', standardVideoRef.current);
 
-            // 根据偏移量延迟视频播放（与 SyncAlign 逻辑一致）
-            // sync_offset_ms 正数 = 视频晚播（延迟播放）
-            if (syncOffsetMs > 0) {
-              // 视频延迟播放
-              setTimeout(() => {
-                video.play().catch(() => {
-                  setWarning('标准动作视频播放失败，请重试');
-                });
-              }, syncOffsetMs);
-            } else {
-              // 偏移量为负或 0，视频立即播放
-              const onSeeked = () => {
-                video.removeEventListener('seeked', onSeeked);
-                video.play().catch(() => {
-                  setWarning('标准动作视频播放失败，请重试');
-                });
-              };
-              video.addEventListener('seeked', onSeeked);
+            // 确保标准视频从头开始
+            if (standardVideoRef.current) {
+              const video = standardVideoRef.current;
+              video.pause();
+              video.currentTime = 0;
+
+              // 根据偏移量延迟视频播放（与 SyncAlign 逻辑一致）
+              // sync_offset_ms 正数 = 视频晚播（延迟播放）
+              if (syncOffsetMs > 0) {
+                // 视频延迟播放
+                setTimeout(() => {
+                  video.play().catch(() => {
+                    setWarning('标准动作视频播放失败，请重试');
+                  });
+                }, syncOffsetMs);
+              } else {
+                // 偏移量为负或 0，视频立即播放
+                const onSeeked = () => {
+                  video.removeEventListener('seeked', onSeeked);
+                  video.play().catch(() => {
+                    setWarning('标准动作视频播放失败，请重试');
+                  });
+                };
+                video.addEventListener('seeked', onSeeked);
+              }
             }
-          }
 
-          connectWebSocket(selectedAction.id, syncOffsetMs);
-          startFrameLoop();
-          startMusic();
+            connectWebSocket(selectedAction.id, syncOffsetMs);
+            startFrameLoop();
+            startMusic();
+          }, 300); // 给 LiveVideoPanel 300ms 完成挂载和设置 ref
         }, 200);
       } else {
         setCountdown(count);
