@@ -209,6 +209,9 @@ const ActionForm: React.FC = () => {
                     <Upload className="w-4 h-4 text-indigo-600" />
                     上传标准视频
                   </label>
+                  <div className="mb-3 p-3 rounded-xl bg-amber-50 border border-amber-100 text-amber-700 text-xs">
+                    提示：这里上传的是标准动作示范视频，只会进入动作库，不会进入“我的练习视频”。
+                  </div>
                   <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center hover:border-indigo-500 transition-colors cursor-pointer relative">
                     <input
                       type="file"

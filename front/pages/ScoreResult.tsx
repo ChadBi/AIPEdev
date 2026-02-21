@@ -231,9 +231,9 @@ const ScoreResult: React.FC = () => {
     }
   };
 
-  const jointData = Object.entries(scoreData.joint_scores).map(([name, score]) => ({
+  const jointData = Object.entries(scoreData.joint_scores as Record<string, number>).map(([name, score]) => ({
     name: jointNameCn(name),
-    score,
+    score: Number(score),
     key: name,
   }));
 

@@ -1,7 +1,15 @@
-
-import React, { useState, useEffect, createContext, useContext } from 'react';
-import { HashRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
-import { AuthState, User, UserRole } from './types';
+import React, { useState, useEffect, createContext, useContext, ReactNode } from 'react';
+import { createRoot } from 'react-dom/client';
+import {
+  HashRouter,
+  Routes,
+  Route,
+  Navigate,
+  Outlet,
+  useLocation,
+  useNavigate
+} from 'react-router-dom';
+import { AuthState, User } from './types';
 import api from './api';
 
 // Pages
@@ -37,7 +45,13 @@ export const useAuth = () => {
   return context;
 };
 
-const App: React.FC = () => {
+// Protected Route Component
+const ProtectedRoute: React.FC<{ children?: ReactNode }> = ({ children }) => {
+  const { auth } = useAuth();
+  return auth.isAuthenticated ? children || <Outlet /> : <Navigate to="/login" replace />;
+};
+
+const AppContent: React.FC = () => {
   const [auth, setAuth] = useState<AuthState>({
     token: localStorage.getItem('access_token'),
     user: null,
@@ -54,7 +68,9 @@ const App: React.FC = () => {
           setAuth(prev => ({ ...prev, user: res.data, isAuthenticated: true }));
         } catch (err) {
           console.error("Auth verify failed", err);
-          logout();
+          // 清除无效的token
+          localStorage.removeItem('access_token');
+          setAuth({ token: null, user: null, isAuthenticated: false });
         }
       }
       setLoading(false);
@@ -82,40 +98,41 @@ const App: React.FC = () => {
 
   return (
     <AuthContext.Provider value={{ auth, login, logout }}>
-      <Router>
-        <Routes>
-          <Route path="/login" element={!auth.isAuthenticated ? <LoginPage /> : <Navigate to="/" />} />
-          <Route path="/register" element={!auth.isAuthenticated ? <RegisterPage /> : <Navigate to="/" />} />
-          
-          <Route element={<ProtectedRoute isAuthenticated={auth.isAuthenticated} />}>
-            <Route element={<Layout />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/actions" element={<ActionLibrary />} />
-              <Route path="/actions/create" element={<ActionForm />} />
-              <Route path="/actions/:id" element={<ActionDetail />} />
-              <Route path="/actions/:id/edit" element={<ActionForm />} />
-              <Route path="/videos" element={<VideoLibrary />} />
-              <Route path="/videos/upload" element={<VideoUpload />} />
-              <Route path="/scores" element={<ScoringPage />} />
-              <Route path="/scores/result/:id" element={<ScoreResult />} />
-              <Route path="/scores/history" element={<ScoreHistory />} />
-              <Route path="/scores/live" element={<LiveScoring />} />
-              <Route path="/music" element={<MusicLibrary />} />
-              <Route path="/sync/align" element={<SyncAlign />} />
-              <Route path="/profile" element={<UserProfile />} />
-              <Route path="/users/me" element={<UserProfile />} />
-            </Route>
+      <Routes>
+        <Route path="/login" element={!auth.isAuthenticated ? <LoginPage /> : <Navigate to="/" replace />} />
+        <Route path="/register" element={!auth.isAuthenticated ? <RegisterPage /> : <Navigate to="/" replace />} />
+
+        <Route element={<ProtectedRoute />}>
+          <Route element={<Layout />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/actions" element={<ActionLibrary />} />
+            <Route path="/actions/create" element={<ActionForm />} />
+            <Route path="/actions/:id" element={<ActionDetail />} />
+            <Route path="/actions/:id/edit" element={<ActionForm />} />
+            <Route path="/videos" element={<VideoLibrary />} />
+            <Route path="/videos/upload" element={<VideoUpload />} />
+            <Route path="/scores" element={<ScoringPage />} />
+            <Route path="/scores/result/:id" element={<ScoreResult />} />
+            <Route path="/scores/history" element={<ScoreHistory />} />
+            <Route path="/scores/live" element={<LiveScoring />} />
+            <Route path="/music" element={<MusicLibrary />} />
+            <Route path="/sync/align" element={<SyncAlign />} />
+            <Route path="/profile" element={<UserProfile />} />
+            <Route path="/users/me" element={<UserProfile />} />
           </Route>
-        </Routes>
-      </Router>
+        </Route>
+      </Routes>
     </AuthContext.Provider>
   );
 };
 
-// Fixed ProtectedRoute: directly using Outlet from react-router-dom to avoid 'require' error
-const ProtectedRoute = ({ isAuthenticated }: { isAuthenticated: boolean }) => {
-  return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />;
+const App: React.FC = () => {
+  return (
+    <HashRouter>
+      <AppContent />
+    </HashRouter>
+  );
 };
 
 export default App;

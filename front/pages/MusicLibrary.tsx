@@ -12,7 +12,8 @@ import {
   X,
   Clock,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  FileAudio
 } from 'lucide-react';
 
 const MusicLibrary: React.FC = () => {

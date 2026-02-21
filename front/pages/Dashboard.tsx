@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../App';
 import api from '../api';
-import { Action, VideoRecord, ScoreHistoryItem } from '../types';
+import { Action, ScoreHistoryItem } from '../types';
 import { 
   Play, 
   Library, 
@@ -20,36 +20,79 @@ const Dashboard: React.FC = () => {
   const [recentActions, setRecentActions] = useState<Action[]>([]);
   const [stats, setStats] = useState({ videos: 0, actions: 0, scores: 0 });
   const [history, setHistory] = useState<ScoreHistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [historyLoadError, setHistoryLoadError] = useState('');
+
+  const fetchData = async () => {
+    setLoading(true);
+    setLoadError('');
+    setHistoryLoadError('');
+
+    const [
+      actionsRes,
+      actionsAllRes,
+      myVideosRes,
+      historyRes,
+    ] = await Promise.allSettled([
+      api.get('/actions/?limit=3'),
+      api.get('/actions/?limit=1000'),
+      api.get('/videos/me?limit=1000'),
+      api.get('/scores/history?limit=10'),
+    ]);
+
+    let hasAnyError = false;
+
+    if (actionsRes.status === 'fulfilled') {
+      setRecentActions(actionsRes.value.data || []);
+    } else {
+      hasAnyError = true;
+      setRecentActions([]);
+      console.error('Dashboard actions load failed', actionsRes.reason);
+    }
+
+    if (historyRes.status === 'fulfilled') {
+      setHistory(historyRes.value.data || []);
+    } else {
+      hasAnyError = true;
+      setHistory([]);
+      setHistoryLoadError('评分趋势数据加载失败');
+      console.error('Dashboard score history load failed', historyRes.reason);
+    }
+
+    const actionCount =
+      actionsAllRes.status === 'fulfilled'
+        ? (actionsAllRes.value.data || []).length
+        : actionsRes.status === 'fulfilled'
+          ? (actionsRes.value.data || []).length
+          : 0;
+    const videoCount =
+      myVideosRes.status === 'fulfilled'
+        ? (myVideosRes.value.data || []).length
+        : 0;
+    const scoreCount =
+      historyRes.status === 'fulfilled'
+        ? (historyRes.value.data || []).length
+        : 0;
+
+    if (actionsAllRes.status === 'rejected' || myVideosRes.status === 'rejected') {
+      hasAnyError = true;
+    }
+
+    setStats({
+      videos: videoCount,
+      actions: actionCount,
+      scores: scoreCount,
+    });
+
+    if (hasAnyError) {
+      setLoadError('仪表盘部分数据加载失败，已显示可用数据。');
+    }
+
+    setLoading(false);
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [actionsRes, myVideosRes] = await Promise.all([
-          api.get('/actions/?limit=3'),
-          api.get('/videos/me?limit=100'),
-        ]);
-        setRecentActions(actionsRes.data);
-        
-        // 评分历史需要登录，单独请求并容错
-        try {
-          const historyRes = await api.get('/scores/history?limit=10');
-          setHistory(historyRes.data);
-          setStats({
-            videos: myVideosRes.data.length,
-            actions: actionsRes.data.length,
-            scores: historyRes.data.length
-          });
-        } catch {
-          setStats({
-            videos: myVideosRes.data.length,
-            actions: actionsRes.data.length,
-            scores: 0
-          });
-        }
-      } catch (err) {
-        console.error("Dashboard data load failed", err);
-      }
-    };
     fetchData();
   }, []);
 
@@ -74,6 +117,18 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
+      {loadError && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-between gap-4">
+          <p className="text-amber-700 text-sm">{loadError}</p>
+          <button
+            onClick={fetchData}
+            className="px-4 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700 transition-all"
+          >
+            重试
+          </button>
+        </div>
+      )}
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard icon={<Video className="text-blue-600" />} label="我的视频" value={stats.videos} bgColor="bg-blue-50" />
@@ -89,7 +144,21 @@ const Dashboard: React.FC = () => {
             <Link to="/scores/history" className="text-sm font-semibold text-indigo-600 hover:underline">查看全部</Link>
           </div>
           <div className="h-64">
-            {chartData.length > 0 ? (
+            {loading ? (
+              <div className="h-full flex items-center justify-center text-slate-400">
+                <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-indigo-600"></div>
+              </div>
+            ) : historyLoadError ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3">
+                <p>{historyLoadError}</p>
+                <button
+                  onClick={fetchData}
+                  className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-all"
+                >
+                  重试
+                </button>
+              </div>
+            ) : chartData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData}>
                   <defs>

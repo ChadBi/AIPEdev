@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import api, { getVideoUrl } from '../api';
 import { Action, VideoRecord } from '../types';
 import { Target, ChevronRight, Check, AlertCircle, Loader2, Play, Pause, Volume2, VolumeX, Calendar } from 'lucide-react';
@@ -14,6 +14,9 @@ const ScoringPage: React.FC = () => {
   const [selectedActionId, setSelectedActionId] = useState<number | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<number | null>(initialVideoId ? parseInt(initialVideoId) : null);
   const [loading, setLoading] = useState(false);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [actionLoadError, setActionLoadError] = useState('');
+  const [videoLoadError, setVideoLoadError] = useState('');
   const [step, setStep] = useState(1);
   
   // 时间同步相关
@@ -27,19 +30,36 @@ const ScoringPage: React.FC = () => {
   
   const navigate = useNavigate();
 
+  const fetchData = async () => {
+    setDataLoading(true);
+    setActionLoadError('');
+    setVideoLoadError('');
+
+    const [actionsResult, videosResult] = await Promise.allSettled([
+      api.get('/actions/'),
+      api.get('/videos/me')
+    ]);
+
+    if (actionsResult.status === 'fulfilled') {
+      setActions(actionsResult.value.data || []);
+    } else {
+      setActions([]);
+      setActionLoadError('加载动作列表失败，请重试');
+      console.error(actionsResult.reason);
+    }
+
+    if (videosResult.status === 'fulfilled') {
+      setVideos(videosResult.value.data || []);
+    } else {
+      setVideos([]);
+      setVideoLoadError('加载练习视频失败，请重试');
+      console.error(videosResult.reason);
+    }
+
+    setDataLoading(false);
+  };
+
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [actRes, vidRes] = await Promise.all([
-          api.get('/actions/'),
-          api.get('/videos/me')
-        ]);
-        setActions(actRes.data);
-        setVideos(vidRes.data);
-      } catch (err) {
-        console.error(err);
-      }
-    };
     fetchData();
   }, []);
 
@@ -130,6 +150,17 @@ const ScoringPage: React.FC = () => {
 
   const selectedAction = actions.find(a => a.id === selectedActionId);
   const selectedVideo = videos.find(v => v.id === selectedVideoId);
+
+  const getVideoDisplayName = (video: VideoRecord) => {
+    if (video.filename) return video.filename;
+    const normalized = (video.file_path || '').replace(/\\/g, '/');
+    const fileName = normalized.split('/').pop();
+    return fileName || `练习视频 #${video.id}`;
+  };
+
+  const getVideoCreatedAt = (video: VideoRecord) => {
+    return video.created_at || video.upload_time || '';
+  };
   
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -198,7 +229,23 @@ const ScoringPage: React.FC = () => {
               </div>
               选择标准动作
             </h2>
-            {actions.length === 0 ? (
+            {dataLoading ? (
+              <div className="flex items-center justify-center py-20">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600"></div>
+              </div>
+            ) : actionLoadError ? (
+              <div className="text-center py-20">
+                <AlertCircle className="mx-auto text-red-300 mb-4" size={64} />
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">动作数据加载失败</h3>
+                <p className="text-slate-500 mb-6">{actionLoadError}</p>
+                <button
+                  onClick={fetchData}
+                  className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition-all"
+                >
+                  重新加载
+                </button>
+              </div>
+            ) : actions.length === 0 ? (
               <div className="text-center py-20">
                 <AlertCircle className="mx-auto text-slate-300 mb-4" size={64} />
                 <h3 className="text-xl font-semibold text-slate-900 mb-2">暂无可用动作</h3>
@@ -284,11 +331,33 @@ const ScoringPage: React.FC = () => {
               </div>
               选择您的练习视频
             </h2>
-            {videos.length === 0 ? (
+            {dataLoading ? (
+              <div className="flex items-center justify-center py-20">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600"></div>
+              </div>
+            ) : videoLoadError ? (
+              <div className="text-center py-20">
+                <AlertCircle className="mx-auto text-red-300 mb-4" size={64} />
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">练习视频加载失败</h3>
+                <p className="text-slate-500 mb-6">{videoLoadError}</p>
+                <button
+                  onClick={fetchData}
+                  className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition-all"
+                >
+                  重新加载
+                </button>
+              </div>
+            ) : videos.length === 0 ? (
               <div className="text-center py-20">
                 <AlertCircle className="mx-auto text-slate-300 mb-4" size={64} />
                 <h3 className="text-xl font-semibold text-slate-900 mb-2">暂无可用视频</h3>
-                <p className="text-slate-500">请先上传练习视频</p>
+                <p className="text-slate-500 mb-6">动作库里的标准视频不会出现在这里，请先上传练习视频</p>
+                <Link
+                  to="/videos/upload"
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition-all"
+                >
+                  去上传练习视频
+                </Link>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -319,11 +388,11 @@ const ScoringPage: React.FC = () => {
                     
                     {/* 视频信息 */}
                     <div className="p-6">
-                      <h3 className="font-bold text-lg mb-3 text-slate-900">📹 {video.filename}</h3>
+                      <h3 className="font-bold text-lg mb-3 text-slate-900">📹 {getVideoDisplayName(video)}</h3>
                       <div className="space-y-2 mb-4">
                         <p className="text-slate-600 text-sm flex items-center gap-2">
                           <Calendar size={14} className="text-indigo-500" />
-                          上传时间: {new Date(video.upload_time).toLocaleDateString()}
+                          上传时间: {getVideoCreatedAt(video) ? new Date(getVideoCreatedAt(video)).toLocaleDateString() : '--'}
                         </p>
                         {video.fps && video.total_frames && (
                           <p className="text-slate-600 text-sm flex items-center gap-2">

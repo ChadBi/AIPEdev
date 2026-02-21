@@ -57,7 +57,8 @@ export function getMusicUrl(filePath: string): string {
     return filePath;
   }
   // 音乐文件存储在 uploads/music/ 目录下
-  const cleanPath = filePath.replace(/^\/+/, '');
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  const cleanPath = normalizedPath.replace(/^\/+/, '');
   const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
   return baseUrl ? `${baseUrl}/${cleanPath}` : `/${cleanPath}`;
 }

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import api, { getVideoUrl } from '../api';
+import api, { getVideoUrl, checkModelStatus } from '../api';
 import { getMusicUrl } from '../api/music';
 import { getActionMusicSync, listActionMusicSync } from '../api/sync';
 import {
@@ -9,6 +9,7 @@ import {
   ActionMusicSyncLookup,
   LiveStats,
   LiveWsScorePayload,
+  Keypoints,
 } from '../types';
 import CameraSelector from '../components/CameraSelector';
 import LiveVideoPanel from '../components/LiveVideoPanel';
@@ -93,6 +94,7 @@ const LiveScoring: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
+  const [modelLoaded, setModelLoaded] = useState(false);
 
   const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -102,6 +104,7 @@ const LiveScoring: React.FC = () => {
   const [isPaused, setIsPaused] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [stats, setStats] = useState<LiveStats>(DEFAULT_STATS);
+  const [keypoints, setKeypoints] = useState<Keypoints | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const wsManualCloseRef = useRef(false);
@@ -237,6 +240,17 @@ const LiveScoring: React.FC = () => {
     fetchLiveActions();
   }, [fetchLiveActions]);
 
+  // 检查模型加载状态
+  useEffect(() => {
+    checkModelStatus()
+      .then((status) => {
+        setModelLoaded(status.model_loaded);
+      })
+      .catch(() => {
+        setModelLoaded(false);
+      });
+  }, []);
+
   useEffect(() => {
     if (!selectedActionId) {
       setActionMusicList([]);
@@ -323,7 +337,7 @@ const LiveScoring: React.FC = () => {
       try {
         const message = JSON.parse(event.data);
         if (message.type === 'score') {
-          const payload = message.data as LiveWsScorePayload;
+          const payload = message.data as LiveWsScorePayload & { keypoints?: Keypoints; standard_keypoints?: Keypoints };
           setStats(prev => ({
             ...prev,
             current_score: payload.current_score,
@@ -331,6 +345,10 @@ const LiveScoring: React.FC = () => {
             frames_processed: payload.processed_frames,
             latency_ms: Math.max(0, Math.round(performance.now() - startTimeRef.current - payload.elapsed_ms)),
           }));
+          // 更新关键点数据用于骨架绘制
+          if (payload.keypoints) {
+            setKeypoints(payload.keypoints);
+          }
         } else if (message.type === 'error') {
           setWarning(message.data?.message || '实时检测出现错误');
         }
@@ -559,6 +577,8 @@ const LiveScoring: React.FC = () => {
     setSelectedActionId(actionId);
     setSelectedMusicId(null);
     setSelectedSync(null);
+    setActionMusicList([]);
+    initialMusicAppliedRef.current = false;
     setStage('detect');
     setError('');
     setWarning('');
@@ -598,7 +618,7 @@ const LiveScoring: React.FC = () => {
     }
   };
 
-  const canStart = Boolean(selectedAction && selectedMusic && cameraReady && !syncLoading);
+  const canStart = Boolean(selectedAction && selectedMusic && cameraReady && !syncLoading && modelLoaded);
 
   if (loading) {
     return (
@@ -615,6 +635,10 @@ const LiveScoring: React.FC = () => {
           <div>
             <h1 className="text-3xl font-bold text-slate-900">实时检测</h1>
             <p className="text-slate-500 mt-2">先选择标准动作，再选择音乐与摄像头后开始实时检测</p>
+          </div>
+          <div className={`flex items-center gap-2 px-4 py-2 rounded-xl ${modelLoaded ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+            <div className={`w-3 h-3 rounded-full ${modelLoaded ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`}></div>
+            <span className="font-medium text-sm">{modelLoaded ? '模型已就绪' : '模型加载中...'}</span>
           </div>
         </div>
 
@@ -704,6 +728,10 @@ const LiveScoring: React.FC = () => {
                 {selectedSync?.is_aligned ? '已对齐' : '未对齐'}
                 {' · '}
                 {wsConnected ? '实时连接已建立' : '实时连接未建立'}
+                {' · '}
+                <span className={modelLoaded ? 'text-green-400' : 'text-amber-400'}>
+                  {modelLoaded ? '模型已就绪' : '模型加载中...'}
+                </span>
               </p>
             </div>
           </div>
@@ -753,7 +781,7 @@ const LiveScoring: React.FC = () => {
         <div className="h-full grid grid-rows-2 gap-4">
           {/* 上行：两个视频面板并排 */}
           <div className="grid grid-cols-2 gap-4">
-            {/* 标准动作视频 */}
+            {/* 标准动作视频（静音） */}
             <div className="flex flex-col h-full">
               <LiveVideoPanel
                 videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
@@ -775,6 +803,7 @@ const LiveScoring: React.FC = () => {
                 title="实时画面"
                 isActive={cameraReady}
                 score={stats.current_score > 0 ? stats.current_score : undefined}
+                keypoints={keypoints}
                 showSkeleton
                 className="h-full"
                 muted

@@ -101,6 +101,9 @@ const ActionDetail: React.FC = () => {
               <Link to="/scores" className="block w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100">
                 立刻开始练习
               </Link>
+              <Link to={`/scores/live?action_id=${action.id}`} className="block w-full mt-3 py-4 bg-emerald-600 text-white font-bold rounded-2xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100">
+                实时检测此动作
+              </Link>
               <p className="text-xs text-slate-400 mt-4">已累计 1,240 次练习评价</p>
            </div>
            
