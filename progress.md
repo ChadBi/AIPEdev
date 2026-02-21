@@ -216,4 +216,24 @@ SyncAlign.tsx 页面加载时报错，显示 `setStandardKeypointsLoaded is not 
 
 ---
 
+## 2026-02-21 - 修复 FPS 页面显示问题
+
+### 问题描述
+- 页面显示的 FPS 始终是 1
+- 控制台正确显示 "[FPS] 过去 1 秒发送了 13 帧" 和 "20 帧"
+
+### 问题原因
+React 状态更新的竞争条件：
+- `fps` 是 `stats` 对象的一部分
+- `fpsInterval` 定时器和 WebSocket 消息处理都会调用 `setStats`
+- 高频的状态更新竞争导致 fps 的更新被"覆盖"
+
+### 解决方案
+将 FPS 从共享的 `stats` 状态中分离出来，创建独立的 `displayFps` 状态变量。
+
+### 修改的文件
+- `front/pages/LiveScoring.tsx`
+
+---
+
 **最后更新**: 2026-02-21
