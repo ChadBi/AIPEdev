@@ -394,19 +394,26 @@ const LiveScoring: React.FC = () => {
         return;
       }
       if (!liveVideoRef.current) {
-        console.log('[帧发送] 视频引用不可用');
+        // 每秒只打印一次
+        if (!window._debugLastLog || Date.now() - window._debugLastLog > 1000) {
+          console.log('[帧发送] 视频引用不可用，liveVideoRef.current =', liveVideoRef.current);
+          console.log('[帧发送] 摄像头就绪状态:', cameraReady, '流存在:', !!stream);
+          window._debugLastLog = Date.now();
+        }
         return;
       }
 
       const liveVideo = liveVideoRef.current;
       if (liveVideo.readyState < 2 || liveVideo.videoWidth === 0 || liveVideo.videoHeight === 0) {
         // 减少日志频率
-        if (sentFramesRef.current === 0) {
+        if (sentFramesRef.current === 0 || !window._debugVideoLog || Date.now() - window._debugVideoLog > 2000) {
           console.log('[帧发送] 视频未就绪:', {
             readyState: liveVideo.readyState,
             width: liveVideo.videoWidth,
-            height: liveVideo.videoHeight
+            height: liveVideo.videoHeight,
+            srcObject: !!liveVideo.srcObject
           });
+          window._debugVideoLog = Date.now();
         }
         return;
       }
@@ -884,6 +891,7 @@ const LiveScoring: React.FC = () => {
               {/* 标准动作视频 */}
               <div className="flex flex-col h-full">
                 <LiveVideoPanel
+                  key="standard-video-panel"
                   videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
                   videoRef={standardVideoRef}
                   title="标准动作"
@@ -898,6 +906,7 @@ const LiveScoring: React.FC = () => {
               {/* 实时画面 */}
               <div className="flex flex-col h-full">
                 <LiveVideoPanel
+                  key="live-video-panel"
                   stream={stream}
                   videoRef={liveVideoRef}
                   title="实时画面"
@@ -981,6 +990,7 @@ const LiveScoring: React.FC = () => {
             {/* 标准动作视频（静音） */}
             <div className="flex flex-col h-full">
               <LiveVideoPanel
+                key="standard-video-panel"
                 videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
                 videoRef={standardVideoRef}
                 title="标准动作"
@@ -995,6 +1005,7 @@ const LiveScoring: React.FC = () => {
             {/* 实时画面 */}
             <div className="flex flex-col h-full">
               <LiveVideoPanel
+                key="live-video-panel"
                 stream={stream}
                 videoRef={liveVideoRef}
                 title="实时画面"
