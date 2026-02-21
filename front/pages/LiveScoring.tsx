@@ -440,31 +440,21 @@ const LiveScoring: React.FC = () => {
       audioRef.current = null;
     }
 
-    const offsetMs = selectedSync?.sync_offset_ms || 0;
+    const syncOffsetMs = selectedSync?.sync_offset_ms || 0;
     const audio = new Audio(getMusicUrl(selectedMusic.music_file_path));
     audio.volume = stats.music_volume;
     audio.preload = 'auto';
 
-    // 确保音频从头开始
+    // 音乐始终从头开始播放
     audio.currentTime = 0;
 
-    // 先设置 audioRef，再调用 playAudio
+    // 先设置 audioRef，再播放
     audioRef.current = audio;
 
-    // 处理音乐对齐偏移
-    if (offsetMs > 0) {
-      // 视频比音乐晚（音乐先播放，音乐播放到偏移点时视频开始）
-      // 音乐立即播放，从 0 开始
-      playAudio();
-    } else if (offsetMs < 0) {
-      // 视频比音乐早（视频先播放，视频播放到偏移点时音乐开始）
-      // 音乐延迟播放 |offsetMs| 毫秒
-      scheduleMusicPlay(Math.abs(offsetMs));
-    } else {
-      // 无偏移，同时播放
-      playAudio();
-    }
-  }, [playAudio, scheduleMusicPlay, selectedMusic, selectedSync?.sync_offset_ms, stats.music_volume]);
+    // 音乐立即开始播放（与 SyncAlign 页面的逻辑一致）
+    // sync_offset_ms 控制视频的延迟：正数=视频晚播，负数=视频早播
+    playAudio();
+  }, [playAudio, selectedMusic, selectedSync?.sync_offset_ms, stats.music_volume]);
 
   const handleStart = useCallback(() => {
     if (!selectedAction) {
@@ -526,22 +516,36 @@ const LiveScoring: React.FC = () => {
 
         // 短暂延迟后开始播放，确保媒体已加载
         setTimeout(() => {
+          const syncOffsetMs = selectedSync.sync_offset_ms || 0;
+
           // 确保标准视频从头开始
           if (standardVideoRef.current) {
             const video = standardVideoRef.current;
             video.pause();
             video.currentTime = 0;
-            // 等待视频定位到开头后才播放
-            const onSeeked = () => {
-              video.removeEventListener('seeked', onSeeked);
-              video.play().catch(() => {
-                setWarning('标准动作视频播放失败，请重试');
-              });
-            };
-            video.addEventListener('seeked', onSeeked);
+
+            // 根据偏移量延迟视频播放（与 SyncAlign 逻辑一致）
+            // sync_offset_ms 正数 = 视频晚播（延迟播放）
+            if (syncOffsetMs > 0) {
+              // 视频延迟播放
+              setTimeout(() => {
+                video.play().catch(() => {
+                  setWarning('标准动作视频播放失败，请重试');
+                });
+              }, syncOffsetMs);
+            } else {
+              // 偏移量为负或 0，视频立即播放
+              const onSeeked = () => {
+                video.removeEventListener('seeked', onSeeked);
+                video.play().catch(() => {
+                  setWarning('标准动作视频播放失败，请重试');
+                });
+              };
+              video.addEventListener('seeked', onSeeked);
+            }
           }
 
-          connectWebSocket(selectedAction.id, selectedSync.sync_offset_ms || 0);
+          connectWebSocket(selectedAction.id, syncOffsetMs);
           startFrameLoop();
           startMusic();
         }, 200);
