@@ -288,7 +288,7 @@ const LiveScoring: React.FC = () => {
       })
       .catch((err: any) => {
         if (cancelled) return;
-        setWarning(getErrorMessage(err, '读取动作-音乐对齐配置失败'));
+        setWarning(getErrorMessage(err, '读取动作 - 音乐对齐配置失败'));
         setSelectedSync({
           action_id: selectedActionId,
           music_id: selectedMusicId,
@@ -348,7 +348,7 @@ const LiveScoring: React.FC = () => {
       const isManualClose = wsManualCloseRef.current;
       wsManualCloseRef.current = false;
       if (!isManualClose && isPlaying) {
-        setWarning('实时连接已断开，请点击“开始检测”重试');
+        setWarning('实时连接已断开，请点击"开始检测"重试');
       }
     };
   }, [isPlaying, stopWebSocket]);
@@ -709,6 +709,15 @@ const LiveScoring: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate(`/sync/align?action_id=${selectedActionId}`)}
+              disabled={!selectedActionId}
+              className="flex items-center gap-2 px-4 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="进入音乐对齐页面"
+            >
+              <Music2 size={18} />
+              音乐对齐
+            </button>
             {!isPlaying ? (
               <button
                 onClick={handleStart}
@@ -741,63 +750,50 @@ const LiveScoring: React.FC = () => {
       </header>
 
       <div className="flex-1 p-6 overflow-hidden">
-        <div className="h-full grid grid-cols-12 gap-6">
-          <div className="col-span-7 flex flex-col gap-4">
-            <LiveVideoPanel
-              videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
-              videoRef={standardVideoRef}
-              title="标准动作"
-              isActive={isPlaying && !isPaused}
-              score={stats.average_score > 0 ? stats.average_score : undefined}
-              showSkeleton={false}
-              className="flex-1"
-              muted
-              loop
-            />
+        <div className="h-full grid grid-rows-2 gap-4">
+          {/* 上行：两个视频面板并排 */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* 标准动作视频 */}
+            <div className="flex flex-col h-full">
+              <LiveVideoPanel
+                videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
+                videoRef={standardVideoRef}
+                title="标准动作"
+                isActive={isPlaying && !isPaused}
+                showSkeleton={false}
+                className="h-full"
+                muted
+                loop
+              />
+            </div>
 
-            <div className="bg-slate-800 rounded-2xl p-4">
-              <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                <Music2 size={18} className="text-indigo-400" />
-                音乐与对齐
-              </h3>
-              {selectedMusic ? (
-                <div className="space-y-3">
-                  <p className="text-slate-200 text-sm">{selectedMusic.music_name}</p>
-                  <p className="text-slate-400 text-xs">
-                    偏移: {(selectedSync?.sync_offset_ms || 0) / 1000}s
-                  </p>
-                  {!selectedSync?.is_aligned && (
-                    <p className="text-amber-300 text-xs">当前组合未完成对齐，开始检测时会按当前偏移运行。</p>
-                  )}
-                  <div className="flex items-center gap-3">
-                    <span className="text-slate-400 text-xs">音量</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.1"
-                      value={stats.music_volume}
-                      onChange={handleVolumeChange}
-                      className="w-40 accent-indigo-500"
-                    />
-                  </div>
-                </div>
-              ) : (
-                <p className="text-amber-300 text-sm">开始检测前必须选择音乐。</p>
-              )}
+            {/* 实时画面 */}
+            <div className="flex flex-col h-full">
+              <LiveVideoPanel
+                stream={stream}
+                videoRef={liveVideoRef}
+                title="实时画面"
+                isActive={cameraReady}
+                score={stats.current_score > 0 ? stats.current_score : undefined}
+                showSkeleton
+                className="h-full"
+                muted
+              />
             </div>
           </div>
 
-          <div className="col-span-5 flex flex-col gap-4">
-            <div className="bg-slate-800 rounded-2xl p-4">
+          {/* 下行：三个控制面板并排 */}
+          <div className="grid grid-cols-3 gap-4">
+            {/* 音乐选择 */}
+            <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
               <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
                 <Music2 size={18} className="text-indigo-400" />
-                选择音乐（必选）
+                选择音乐
               </h3>
               {actionMusicList.length === 0 ? (
                 <p className="text-slate-400 text-sm">暂无可用音乐，请先到音乐库上传。</p>
               ) : (
-                <div className="space-y-2 max-h-44 overflow-auto">
+                <div className="space-y-2 flex-1 overflow-auto">
                   {actionMusicList.map((item) => (
                     <button
                       key={item.music_id}
@@ -810,8 +806,8 @@ const LiveScoring: React.FC = () => {
                       } disabled:opacity-50`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">{item.music_name}</span>
-                        <span className={`text-xs ${item.is_aligned ? 'text-green-300' : 'text-amber-300'}`}>
+                        <span className="text-sm font-medium truncate">{item.music_name}</span>
+                        <span className={`text-xs shrink-0 ${item.is_aligned ? 'text-green-300' : 'text-amber-300'}`}>
                           {item.is_aligned ? '已对齐' : '未对齐'}
                         </span>
                       </div>
@@ -821,40 +817,57 @@ const LiveScoring: React.FC = () => {
               )}
             </div>
 
-            <CameraSelector
-              onDeviceChange={setSelectedCamera}
-              selectedDeviceId={selectedCamera}
-              onStreamReady={handleStreamReady}
-              disabled={isPlaying}
-            />
+            {/* 摄像头选择 */}
+            <div className="flex flex-col h-full min-h-0">
+              <CameraSelector
+                onDeviceChange={setSelectedCamera}
+                selectedDeviceId={selectedCamera}
+                onStreamReady={handleStreamReady}
+                disabled={isPlaying}
+              />
+            </div>
 
-            <LiveVideoPanel
-              stream={stream}
-              videoRef={liveVideoRef}
-              title="实时画面"
-              isActive={cameraReady}
-              score={stats.current_score > 0 ? stats.current_score : undefined}
-              showSkeleton
-              className="flex-1"
-              muted
-            />
+            {/* 音乐控制与实时统计 */}
+            <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
+              <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <Music2 size={18} className="text-indigo-400" />
+                音乐控制
+              </h3>
+              {selectedMusic ? (
+                <div className="space-y-3 mb-4">
+                  <p className="text-slate-200 text-sm truncate">{selectedMusic.music_name}</p>
+                  <p className="text-slate-400 text-xs">
+                    偏移：{(selectedSync?.sync_offset_ms || 0) / 1000}s
+                  </p>
+                  {!selectedSync?.is_aligned && (
+                    <p className="text-amber-300 text-xs">当前组合未完成对齐</p>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 text-xs">音量</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      value={stats.music_volume}
+                      onChange={handleVolumeChange}
+                      className="flex-1 accent-indigo-500"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <p className="text-amber-300 text-sm mb-4">开始检测前必须选择音乐。</p>
+              )}
 
-            <div className="bg-slate-800 rounded-2xl p-4">
-              <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+              <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
                 <Zap size={18} className="text-yellow-500" />
                 实时统计
               </h3>
-              <div className="grid grid-cols-2 gap-4">
-                <StatCard label="FPS" value={String(stats.fps)} icon={<Target size={16} />} />
-                <StatCard label="当前分数" value={stats.current_score.toFixed(1)} icon={<Target size={16} />} />
-                <StatCard label="平均分数" value={stats.average_score.toFixed(1)} icon={<Target size={16} />} />
-                <StatCard label="处理延迟" value={`${Math.round(stats.latency_ms)}ms`} icon={<Clock size={16} />} />
-                <StatCard label="已处理帧" value={String(stats.frames_processed)} icon={<Zap size={16} />} />
-                <StatCard
-                  label="播放状态"
-                  value={isPlaying ? (isPaused ? '已暂停' : '进行中') : '未开始'}
-                  icon={isPlaying && !isPaused ? <CheckCircle2 size={16} className="text-green-500" /> : undefined}
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <StatCard label="FPS" value={String(stats.fps)} />
+                <StatCard label="分数" value={stats.current_score.toFixed(0)} />
+                <StatCard label="平均" value={stats.average_score.toFixed(0)} />
+                <StatCard label="延迟" value={`${Math.round(stats.latency_ms)}ms`} />
               </div>
             </div>
           </div>
@@ -878,13 +891,9 @@ const LiveScoring: React.FC = () => {
 const StatCard: React.FC<{
   label: string;
   value: string;
-  icon?: React.ReactNode;
-}> = ({ label, value, icon }) => (
+}> = ({ label, value }) => (
   <div className="bg-slate-700/50 rounded-xl p-3">
-    <div className="flex items-center gap-2 text-slate-400 text-xs mb-1">
-      {icon}
-      {label}
-    </div>
+    <div className="text-slate-400 text-xs mb-1">{label}</div>
     <div className="text-lg font-bold text-slate-100">{value}</div>
   </div>
 );
