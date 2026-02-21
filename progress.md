@@ -270,4 +270,32 @@ React 状态更新的竞争条件：
 
 ---
 
+## 2026-02-21 - 修复全屏模式下视频引用丢失问题
+
+### 问题描述
+切换到全屏比对模式后出现：
+- 控制台显示 "[帧发送] 视频未就绪"
+- FPS 始终为 0
+- 无法发送帧到后端进行姿态识别
+
+### 问题原因
+当 `isFullscreenCompare` 状态变化导致布局切换时：
+1. 常规布局是 `grid-rows-2` 结构
+2. 全屏比对模式是 `flex` 结构
+3. LiveVideoPanel 组件在两种布局中的 DOM 位置和层级不同
+4. React 将这些变化识别为需要卸载并重新挂载组件
+5. 组件卸载时，`externalVideoRef.current` 的引用被清空
+
+### 解决方案
+为所有 LiveVideoPanel 组件添加固定的 `key` 属性：
+- 实时画面：`key="live-video-panel"`
+- 标准动作视频：`key="standard-video-panel"`
+
+React 使用 `key` 识别组件身份，即使位置和层级变化也会保留组件实例，保持 ref 引用有效。
+
+### 修改的文件
+- `front/pages/LiveScoring.tsx`
+
+---
+
 **最后更新**: 2026-02-21
