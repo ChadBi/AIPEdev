@@ -103,6 +103,8 @@ const LiveScoring: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [isFullscreenCompare, setIsFullscreenCompare] = useState(false);
+  const [showStatsPanel, setShowStatsPanel] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
   const [stats, setStats] = useState<LiveStats>(DEFAULT_STATS);
   const [displayFps, setDisplayFps] = useState(0);
@@ -181,6 +183,8 @@ const LiveScoring: React.FC = () => {
 
     setIsPlaying(false);
     setIsPaused(false);
+    setIsFullscreenCompare(false);
+    setShowStatsPanel(true);
     setStats(prev => ({
       ...DEFAULT_STATS,
       music_volume: prev.music_volume,
@@ -524,8 +528,9 @@ const LiveScoring: React.FC = () => {
       if (count <= 0) {
         clearInterval(countdownTimer);
         setCountdown(null);
-        // 倒计时结束，开始检测
+        // 倒计时结束，进入全屏比对模式
         setIsPlaying(true);
+        setIsFullscreenCompare(true);
         startTimeRef.current = performance.now();
 
         // 确保所有媒体都从头开始
@@ -871,7 +876,106 @@ const LiveScoring: React.FC = () => {
           </div>
         )}
 
-        <div className={`h-full grid grid-rows-2 gap-4 ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
+        {/* 全屏比对模式 */}
+        {isFullscreenCompare ? (
+          <div className={`h-full flex ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
+            {/* 主视频区域 - 并排大屏 */}
+            <div className="flex-1 grid grid-cols-2 gap-4">
+              {/* 标准动作视频 */}
+              <div className="flex flex-col h-full">
+                <LiveVideoPanel
+                  videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
+                  videoRef={standardVideoRef}
+                  title="标准动作"
+                  isActive={isPlaying && !isPaused}
+                  showSkeleton={false}
+                  className="h-full"
+                  muted
+                  loop
+                />
+              </div>
+
+              {/* 实时画面 */}
+              <div className="flex flex-col h-full">
+                <LiveVideoPanel
+                  stream={stream}
+                  videoRef={liveVideoRef}
+                  title="实时画面"
+                  isActive={cameraReady}
+                  score={stats.current_score > 0 ? stats.current_score : undefined}
+                  keypoints={keypoints}
+                  showSkeleton
+                  className="h-full"
+                  muted
+                />
+              </div>
+            </div>
+
+            {/* 可折叠的参数面板 */}
+            <div className={`flex flex-col transition-all duration-300 ${showStatsPanel ? 'w-80 ml-4' : 'w-0 overflow-hidden'}`}>
+              <div className="bg-slate-800/95 backdrop-blur-sm rounded-2xl p-4 flex flex-col h-full">
+                {/* 面板头部 */}
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-white font-semibold flex items-center gap-2">
+                    <Zap size={18} className="text-yellow-500" />
+                    实时统计
+                  </h3>
+                  <button
+                    onClick={() => setShowStatsPanel(false)}
+                    className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-700"
+                    title="隐藏面板"
+                  >
+                    <Square size={18} />
+                  </button>
+                </div>
+
+                {/* 当前分数大显示 */}
+                <div className="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl p-6 mb-4 text-center">
+                  <div className="text-5xl font-bold text-white">{stats.current_score.toFixed(0)}</div>
+                  <div className="text-white/80 text-sm mt-1">当前分数</div>
+                </div>
+
+                {/* 详细统计数据 */}
+                <div className="flex-1 space-y-2 overflow-auto">
+                  <StatCard label="FPS" value={String(displayFps)} />
+                  <StatCard label="平均" value={stats.average_score.toFixed(0)} />
+                  <StatCard label="处理帧数" value={String(stats.frames_processed)} />
+                  <StatCard label="网络延迟" value={`${Math.round(stats.latency_ms)}ms`} />
+                  <StatCard label="音乐状态" value={stats.music_playing ? '播放中' : '未播放'} />
+                </div>
+
+                {/* 音量控制 */}
+                <div className="mt-4 pt-4 border-t border-slate-700">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 text-xs">音量</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      value={stats.music_volume}
+                      onChange={handleVolumeChange}
+                      className="flex-1 accent-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 浮动按钮：显示统计面板 */}
+            {!showStatsPanel && (
+              <button
+                onClick={() => setShowStatsPanel(true)}
+                className="fixed bottom-6 right-6 bg-slate-800/90 backdrop-blur-sm text-white p-3 rounded-full shadow-lg hover:bg-slate-700 transition-all z-40"
+                title="显示统计面板"
+              >
+                <Zap size={24} />
+              </button>
+            )}
+          </div>
+        ) : (
+          /* 常规布局 */
+          <div className={`h-full grid grid-rows-2 gap-4 ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
           {/* 上行：两个视频面板并排 */}
           <div className="grid grid-cols-2 gap-4">
             {/* 标准动作视频（静音） */}
@@ -1001,7 +1105,7 @@ const LiveScoring: React.FC = () => {
             </div>
           </div>
         </div>
-      </div>
+        )}
 
       {(error || warning) && (
         <div className="px-6 pb-4">
@@ -1013,7 +1117,8 @@ const LiveScoring: React.FC = () => {
           )}
         </div>
       )}
-    </div>
+      </div>  // Close flex-1 content div
+    </div>      // Close main container
   );
 };
 
