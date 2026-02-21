@@ -24,16 +24,19 @@ cd front && npm install
 # 4. 初始化数据库
 python init_db.py
 
+# （开发调试）重置数据库并重建表结构
+.venv/Scripts/python.exe tools/reset_dev_db.py --yes
+
 # 5. 启动服务
 uvicorn main:app --reload     # 后端 (8000)
-cd front && npm run dev       # 前端 (5173)
+cd front && npm run dev       # 前端 (3000)
 ```
 
 ## 访问地址
 
 | 服务 | 地址 |
 |------|------|
-| 前端 | http://localhost:5173 |
+| 前端 | http://localhost:3000 |
 | API 文档 | http://localhost:8000/docs |
 | 健康检查 | http://localhost:8000/health |
 
@@ -72,19 +75,24 @@ AIPEdev/
 ### 认证模块 `/auth`
 - `POST /auth/register` - 用户注册
 - `POST /auth/login` - OAuth2 登录
-- `GET /auth/me` - 获取当前用户
+
+### 用户模块 `/users`
+- `GET /users/me` - 获取当前用户
 
 ### 动作库 `/actions`
 - `POST /actions/create-from-video` - 从视频创建标准动作
 - `GET /actions/` - 获取动作列表
+- `GET /actions/count` - 获取动作总数
 
 ### 视频管理 `/videos`
 - `POST /videos/upload` - 上传视频
-- `GET /videos/my-videos` - 获取我的视频
+- `GET /videos/me` - 获取我的视频
+- `GET /videos/me/count` - 获取我的视频总数
 
 ### 评分系统 `/scores`
 - `POST /scores/` - 执行动作评分
 - `GET /scores/history` - 查看评分历史
+- `GET /scores/history/count` - 获取评分历史总数
 
 ## 文档
 
@@ -92,10 +100,20 @@ AIPEdev/
 
 | 文档 | 说明 |
 |------|------|
+| [COMPLETE_DOCUMENTATION.md](docs/COMPLETE_DOCUMENTATION.md) | **完整项目文档** - 项目概述、架构设计、API 详解、开发指南 |
+| [AI_ASSISTANT_GUIDE.md](docs/AI_ASSISTANT_GUIDE.md) | **AI 助手快速参考** - 为 AI 助手准备的速度查表 |
+| [DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) | **开发日志** - 功能开发记录、Bug 修复、版本历史 |
 | API.md | 详细 API 接口文档 |
 | DEPLOYMENT.md | 部署指南 |
 | PROJECT_SUMMARY.md | 项目总结 |
 | QUICK_REFERENCE.md | 快速参考 |
+
+### 推荐阅读顺序
+
+1. **新上手**: 先读 [AI_ASSISTANT_GUIDE.md](docs/AI_ASSISTANT_GUIDE.md) 的"一分钟了解项目"
+2. **开发功能**: 查看 [COMPLETE_DOCUMENTATION.md](docs/COMPLETE_DOCUMENTATION.md) 的"开发指南"章节
+3. **排查问题**: 参考 [COMPLETE_DOCUMENTATION.md](docs/COMPLETE_DOCUMENTATION.md) 的"故障排查"章节
+4. **了解历史**: 阅读 [DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) 了解功能演进
 
 ## 技术栈
 
