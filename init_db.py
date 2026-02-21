@@ -1,10 +1,5 @@
-from core.database import engine
-from models.user import User
-from models.action import Action
-from models.video import Video
-from models.score import ScoreRecord
-from models.action_record import ActionRecord
-from core.database import Base
+from core.database import engine, Base
+import models  # noqa: F401  # ensure all model modules are registered
 
 def init_db():
     Base.metadata.create_all(bind=engine)

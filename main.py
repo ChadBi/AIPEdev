@@ -5,9 +5,22 @@ from api import auth, user, action, video, recognize, score, music, sync_config,
 from api.websocket import router as ws_router
 from core.config import UPLOAD_DIR
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 创建 FastAPI 应用实例
 app = FastAPI(title="AI 体育教学后端系统")
+
+@app.on_event("startup")
+async def startup_event():
+    """预加载 YOLO 模型，避免首次请求时卡顿"""
+    try:
+        from services.recognition_service import _load_pose_model
+        _load_pose_model()
+        logger.info("YOLO 模型已预加载完成")
+    except Exception as e:
+        logger.warning(f"YOLO 模型预加载失败（首次启动属正常）: {e}")
 
 # ========= CORS 配置 =========
 app.add_middleware(
