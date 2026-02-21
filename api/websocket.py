@@ -129,7 +129,8 @@ async def _handle_live_session(
                 continue
 
             now = time.monotonic()
-            if now - last_emit_at < 0.1:
+            # 减少节流限制，从 0.1 秒改为 0.05 秒（约 20 FPS）
+            if now - last_emit_at < 0.05:
                 continue
             last_emit_at = now
 

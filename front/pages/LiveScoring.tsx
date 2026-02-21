@@ -376,37 +376,60 @@ const LiveScoring: React.FC = () => {
     clearFrameLoops();
 
     fpsIntervalRef.current = window.setInterval(() => {
-      setStats(prev => ({ ...prev, fps: sentFramesRef.current }));
+      const sent = sentFramesRef.current;
+      // 调试：记录实际发送的帧数
+      console.log('[FPS] 过去 1 秒发送了', sent, '帧');
+      setStats(prev => ({ ...prev, fps: sent }));
       sentFramesRef.current = 0;
     }, 1000);
 
     frameIntervalRef.current = window.setInterval(() => {
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-      if (!liveVideoRef.current) return;
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        console.log('[帧发送] WebSocket 未就绪');
+        return;
+      }
+      if (!liveVideoRef.current) {
+        console.log('[帧发送] 视频引用不可用');
+        return;
+      }
 
       const liveVideo = liveVideoRef.current;
-      if (liveVideo.readyState < 2 || liveVideo.videoWidth === 0 || liveVideo.videoHeight === 0) return;
-
-      if (!captureCanvasRef.current) {
-        captureCanvasRef.current = document.createElement('canvas');
+      if (liveVideo.readyState < 2 || liveVideo.videoWidth === 0 || liveVideo.videoHeight === 0) {
+        // 减少日志频率
+        if (sentFramesRef.current === 0) {
+          console.log('[帧发送] 视频未就绪:', {
+            readyState: liveVideo.readyState,
+            width: liveVideo.videoWidth,
+            height: liveVideo.videoHeight
+          });
+        }
+        return;
       }
-      const canvas = captureCanvasRef.current;
-      canvas.width = 640;
-      canvas.height = 480;
-      const context = canvas.getContext('2d', { willReadFrequently: true });
-      if (!context) return;
-      context.drawImage(liveVideo, 0, 0, canvas.width, canvas.height);
 
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-      const elapsedMs = Math.round(performance.now() - startTimeRef.current);
-      wsRef.current.send(JSON.stringify({
-        type: 'frame',
-        data: {
-          image_base64: dataUrl,
-          elapsed_ms: elapsedMs,
-        },
-      }));
-      sentFramesRef.current += 1;
+      try {
+        if (!captureCanvasRef.current) {
+          captureCanvasRef.current = document.createElement('canvas');
+        }
+        const canvas = captureCanvasRef.current;
+        canvas.width = 640;
+        canvas.height = 480;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        if (!context) return;
+        context.drawImage(liveVideo, 0, 0, canvas.width, canvas.height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        const elapsedMs = Math.round(performance.now() - startTimeRef.current);
+        wsRef.current.send(JSON.stringify({
+          type: 'frame',
+          data: {
+            image_base64: dataUrl,
+            elapsed_ms: elapsedMs,
+          },
+        }));
+        sentFramesRef.current += 1;
+      } catch (err) {
+        console.error('[帧发送] 错误:', err);
+      }
     }, 50); // 每 50ms 发送一帧，约 20 FPS
   }, [clearFrameLoops]);
 
