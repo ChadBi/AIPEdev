@@ -178,4 +178,20 @@ SyncAlign.tsx 页面加载时报错，显示 `setStandardKeypointsLoaded is not 
 
 ---
 
+## 2026-02-21 - 修复音乐播放问题
+
+### 问题
+开始检测后音乐不播放，点击开始按钮后没有任何声音。
+
+### 原因
+在 `startMusic` 函数中，`audioRef.current = audio` 的赋值放在了 `playAudio()` 调用之后。而 `playAudio()` 函数首先检查 `if (!audioRef.current) return;`，因此直接返回，没有执行播放逻辑。
+
+### 解决方案
+移动 `audioRef.current = audio` 的赋值位置，确保在调用 `playAudio()` 前已经设置了 audio 引用。
+
+### 修改的文件
+- `front/pages/LiveScoring.tsx`
+
+---
+
 **最后更新**: 2026-02-21
