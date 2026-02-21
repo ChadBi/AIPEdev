@@ -26,6 +26,10 @@ export default defineConfig(({ mode }) => {
             target: 'http://localhost:8000',
             changeOrigin: true,
           },
+          '/music': {
+            target: 'http://localhost:8000',
+            changeOrigin: true,
+          },
           '/recognize': {
             target: 'http://localhost:8000',
             changeOrigin: true,
@@ -34,7 +38,20 @@ export default defineConfig(({ mode }) => {
             target: 'http://localhost:8000',
             changeOrigin: true,
           },
+          '/sync': {
+            target: 'http://localhost:8000',
+            changeOrigin: true,
+          },
+          '/ws': {
+            target: 'ws://localhost:8000',
+            ws: true,
+            changeOrigin: true,
+          },
           '/uploads': {
+            target: 'http://localhost:8000',
+            changeOrigin: true,
+          },
+          '/health': {
             target: 'http://localhost:8000',
             changeOrigin: true,
           },
