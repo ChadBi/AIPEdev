@@ -6,18 +6,26 @@ interface CameraSelectorProps {
   onDeviceChange: (deviceId: string | null) => void;
   selectedDeviceId: string | null;
   onStreamReady?: (stream: MediaStream | null) => void;
+  disabled?: boolean;
 }
 
 const CameraSelector: React.FC<CameraSelectorProps> = ({
   onDeviceChange,
   selectedDeviceId,
-  onStreamReady
+  onStreamReady,
+  disabled = false,
 }) => {
   const [devices, setDevices] = useState<CameraDevice[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [permissionGranted, setPermissionGranted] = useState(false);
   const currentStreamRef = useRef<MediaStream | null>(null);
+  const lastStartedDeviceIdRef = useRef<string | null>(null);
+  const onStreamReadyRef = useRef(onStreamReady);
+
+  useEffect(() => {
+    onStreamReadyRef.current = onStreamReady;
+  }, [onStreamReady]);
 
   // 枚举设备
   const enumerateDevices = useCallback(async () => {
@@ -73,12 +81,7 @@ const CameraSelector: React.FC<CameraSelectorProps> = ({
 
   // 处理设备选择
   const handleDeviceChange = (deviceId: string) => {
-    // 停止当前流
-    if (currentStreamRef.current) {
-      currentStreamRef.current.getTracks().forEach(track => track.stop());
-      currentStreamRef.current = null;
-    }
-
+    if (disabled) return;
     onDeviceChange(deviceId);
   };
 
@@ -87,38 +90,59 @@ const CameraSelector: React.FC<CameraSelectorProps> = ({
     if (currentStreamRef.current) {
       currentStreamRef.current.getTracks().forEach(track => track.stop());
       currentStreamRef.current = null;
-      onStreamReady?.(null);
+      lastStartedDeviceIdRef.current = null;
+      onStreamReadyRef.current?.(null);
     }
-  }, [onStreamReady]);
+  }, []);
 
   // 启动视频流
   const startStream = useCallback(async (deviceId: string) => {
+    if (
+      lastStartedDeviceIdRef.current === deviceId &&
+      currentStreamRef.current &&
+      currentStreamRef.current.getVideoTracks().some(track => track.readyState === 'live')
+    ) {
+      return currentStreamRef.current;
+    }
+
+    stopStream();
+    setError('');
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           deviceId: { exact: deviceId },
           width: { ideal: 1280 },
           height: { ideal: 720 },
-          facingMode: 'user'
-        }
+        },
       });
 
       currentStreamRef.current = stream;
+      lastStartedDeviceIdRef.current = deviceId;
       setPermissionGranted(true);
-      onStreamReady?.(stream);
+      onStreamReadyRef.current?.(stream);
       return stream;
     } catch (err: any) {
       if (err.name === 'NotAllowedError') {
         setError('摄像头权限被拒绝');
       } else if (err.name === 'NotFoundError') {
         setError('选中的摄像头不可用');
+      } else if (err.name === 'OverconstrainedError') {
+        setError('当前设备分辨率约束不支持，建议切换摄像头重试');
       } else {
         setError('无法启动摄像头: ' + (err.message || '未知错误'));
       }
-      onStreamReady?.(null);
+      lastStartedDeviceIdRef.current = null;
+      onStreamReadyRef.current?.(null);
       return null;
     }
-  }, [onStreamReady]);
+  }, [stopStream]);
+
+  // 当选中设备变化时，自动启动新流
+  useEffect(() => {
+    if (!selectedDeviceId) return;
+    startStream(selectedDeviceId);
+  }, [selectedDeviceId, startStream]);
 
   // 清理
   useEffect(() => {
@@ -136,7 +160,7 @@ const CameraSelector: React.FC<CameraSelectorProps> = ({
         </h3>
         <button
           onClick={enumerateDevices}
-          disabled={loading}
+          disabled={loading || disabled}
           className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
           title="刷新设备列表"
         >
@@ -170,6 +194,7 @@ const CameraSelector: React.FC<CameraSelectorProps> = ({
             <button
               key={device.deviceId}
               onClick={() => handleDeviceChange(device.deviceId)}
+              disabled={disabled}
               className={`w-full p-3 rounded-xl text-left transition-all flex items-center gap-3 ${
                 selectedDeviceId === device.deviceId
                   ? 'bg-indigo-50 border-2 border-indigo-500'
@@ -199,10 +224,10 @@ const CameraSelector: React.FC<CameraSelectorProps> = ({
         </div>
       )}
 
-      {permissionGranted && devices.length > 0 && (
+      {permissionGranted && devices.length > 0 && selectedDeviceId && (
         <p className="mt-4 text-xs text-green-600 flex items-center gap-1">
           <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-          摄像头已就绪
+          摄像头流已启动
         </p>
       )}
     </div>

@@ -2,13 +2,18 @@ import React, { useRef, useEffect } from 'react';
 import { Keypoints } from '../types';
 
 interface LiveVideoPanelProps {
-  stream: MediaStream | null;
+  stream?: MediaStream | null;
+  videoSrc?: string;
   title: string;
   isActive?: boolean;
   keypoints?: Keypoints | null;
   score?: number;
   showSkeleton?: boolean;
   className?: string;
+  muted?: boolean;
+  loop?: boolean;
+  videoRef?: React.MutableRefObject<HTMLVideoElement | null>;
+  onTimeUpdate?: (event: React.SyntheticEvent<HTMLVideoElement>) => void;
 }
 
 // 骨架连接定义 (COCO 关键点索引)
@@ -40,13 +45,18 @@ const KEYPOINT_NAMES = [
 ];
 
 const LiveVideoPanel: React.FC<LiveVideoPanelProps> = ({
-  stream,
+  stream = null,
+  videoSrc,
   title,
   isActive = false,
   keypoints = null,
   score,
   showSkeleton = true,
-  className = ''
+  className = '',
+  muted = true,
+  loop = false,
+  videoRef: externalVideoRef,
+  onTimeUpdate,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -58,8 +68,17 @@ const LiveVideoPanel: React.FC<LiveVideoPanelProps> = ({
 
     if (!video || !canvas) return;
 
+    if (externalVideoRef) {
+      externalVideoRef.current = video;
+    }
+
     if (stream) {
       video.srcObject = stream;
+      video.play().catch(() => {
+        // 某些浏览器在自动播放策略下可能被拒绝，保持静默避免中断界面
+      });
+    } else {
+      video.srcObject = null;
     }
 
     // 设置 canvas 尺寸与视频匹配
@@ -78,7 +97,19 @@ const LiveVideoPanel: React.FC<LiveVideoPanelProps> = ({
       video.removeEventListener('loadedmetadata', updateCanvasSize);
       video.removeEventListener('resize', updateCanvasSize);
     };
-  }, [stream]);
+  }, [stream, externalVideoRef]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (videoSrc) {
+      video.src = videoSrc;
+      video.load();
+    } else if (!stream) {
+      video.removeAttribute("src");
+      video.load();
+    }
+  }, [videoSrc, stream]);
 
   // 绘制骨架
   useEffect(() => {
@@ -156,7 +187,9 @@ const LiveVideoPanel: React.FC<LiveVideoPanelProps> = ({
           ref={videoRef}
           autoPlay
           playsInline
-          muted
+          muted={muted}
+          loop={loop}
+          onTimeUpdate={onTimeUpdate}
           className="w-full h-full object-cover"
         />
         <canvas
@@ -165,7 +198,7 @@ const LiveVideoPanel: React.FC<LiveVideoPanelProps> = ({
         />
 
         {/* 没有视频流时的占位 */}
-        {!stream && (
+        {!stream && !videoSrc && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
             <svg className="w-16 h-16 mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />

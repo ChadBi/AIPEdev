@@ -1,240 +1,289 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from sqlalchemy.orm import Session
-from typing import Dict, Set
+from typing import Dict, Set, Any
 import json
 import asyncio
+import time
+import logging
 from datetime import datetime
 
-from core.database import get_db
+from core.database import SessionLocal
+from core.config import SAMPLE_FPS
 from crud import video as video_crud
-from crud import sync_config as sync_crud
-from services.recognition_service import recognize_video
+from crud import action as action_crud
+from services.recognition_service import recognize_video, recognize_frame_base64
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
-# 连接管理器
+
 class ConnectionManager:
     """WebSocket 连接管理器"""
 
     def __init__(self):
-        # 活跃连接: {video_id: set of WebSocket}
-        self.active_connections: Dict[int, Set[WebSocket]] = {}
+        self.active_connections: Dict[str, Set[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket, video_id: int):
-        """建立连接"""
+    async def connect(self, websocket: WebSocket, channel: str):
         await websocket.accept()
-        if video_id not in self.active_connections:
-            self.active_connections[video_id] = set()
-        self.active_connections[video_id].add(websocket)
+        if channel not in self.active_connections:
+            self.active_connections[channel] = set()
+        self.active_connections[channel].add(websocket)
 
-    def disconnect(self, websocket: WebSocket, video_id: int):
-        """断开连接"""
-        if video_id in self.active_connections:
-            self.active_connections[video_id].discard(websocket)
-            if not self.active_connections[video_id]:
-                del self.active_connections[video_id]
+    def disconnect(self, websocket: WebSocket, channel: str):
+        if channel in self.active_connections:
+            self.active_connections[channel].discard(websocket)
+            if not self.active_connections[channel]:
+                del self.active_connections[channel]
 
-    async def send_message(self, video_id: int, message: dict):
-        """发送消息给指定视频的所有连接"""
-        if video_id in self.active_connections:
-            for connection in list(self.active_connections[video_id]):
-                try:
-                    await connection.send_json(message)
-                except Exception:
-                    # 发送失败则移除连接
-                    self.disconnect(connection, video_id)
-
-    async def broadcast_score(self, video_id: int, score_data: dict):
-        """广播评分数据"""
-        await self.send_message(video_id, {
-            "type": "score",
-            "data": score_data,
-            "timestamp": datetime.utcnow().isoformat()
-        })
+    async def send_message(self, channel: str, message: dict):
+        if channel not in self.active_connections:
+            return
+        for connection in list(self.active_connections[channel]):
+            try:
+                await connection.send_json(message)
+            except Exception:
+                self.disconnect(connection, channel)
 
 
 manager = ConnectionManager()
 
 
+def _utc_now() -> str:
+    return datetime.utcnow().isoformat()
+
+
+def _select_standard_keypoints(
+    standard_sequence: list[dict],
+    elapsed_ms: int,
+    sync_offset_ms: int
+) -> tuple[int, dict]:
+    if not standard_sequence:
+        return 0, {}
+    adjusted_elapsed_ms = max(0, elapsed_ms + sync_offset_ms)
+    frame_index = int((adjusted_elapsed_ms / 1000.0) * SAMPLE_FPS)
+    frame_index = min(frame_index, len(standard_sequence) - 1)
+    return frame_index, standard_sequence[frame_index].get("keypoints", {})
+
+
+async def _send_error(channel: str, message: str, error_code: str = "runtime_error"):
+    await manager.send_message(channel, {
+        "type": "error",
+        "data": {"message": message, "error_code": error_code},
+        "timestamp": _utc_now()
+    })
+
+
+async def _handle_live_session(
+    websocket: WebSocket,
+    channel: str,
+    standard_sequence: list[dict],
+    sync_offset_ms: int = 0,
+):
+    await manager.connect(websocket, channel)
+    await manager.send_message(channel, {
+        "type": "status",
+        "data": {
+            "status": "connected",
+            "message": "实时检测连接已建立",
+            "standard_frames": len(standard_sequence),
+            "sample_fps": SAMPLE_FPS,
+            "sync_offset_ms": sync_offset_ms,
+        },
+        "timestamp": _utc_now()
+    })
+
+    start_monotonic = time.monotonic()
+    total_score = 0.0
+    processed_frames = 0
+    last_emit_at = 0.0
+
+    try:
+        while True:
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+            except asyncio.TimeoutError:
+                await manager.send_message(channel, {
+                    "type": "ping",
+                    "data": {},
+                    "timestamp": _utc_now()
+                })
+                continue
+
+            payload = json.loads(raw)
+            message_type = payload.get("type")
+            data = payload.get("data", {}) or {}
+
+            if message_type == "ping":
+                await manager.send_message(channel, {
+                    "type": "pong",
+                    "data": {"message": "pong"},
+                    "timestamp": _utc_now()
+                })
+                continue
+
+            if message_type not in {"frame", "keypoints"}:
+                await _send_error(channel, f"未知消息类型: {message_type}", "invalid_message_type")
+                continue
+
+            now = time.monotonic()
+            if now - last_emit_at < 0.2:
+                continue
+            last_emit_at = now
+
+            elapsed_ms = int(data.get("elapsed_ms") or ((now - start_monotonic) * 1000))
+
+            client_keypoints = data.get("keypoints")
+            if message_type == "frame":
+                frame_base64 = data.get("image_base64") or data.get("frame_base64")
+                if not frame_base64:
+                    await _send_error(channel, "frame 消息缺少 image_base64", "missing_frame_data")
+                    continue
+                try:
+                    client_keypoints = recognize_frame_base64(frame_base64)
+                except Exception as exc:
+                    logger.exception("单帧识别失败")
+                    await _send_error(channel, str(exc), "frame_inference_failed")
+                    continue
+
+            if not isinstance(client_keypoints, dict):
+                await _send_error(channel, "关键点数据格式错误", "invalid_keypoints")
+                continue
+
+            std_idx, standard_frame = _select_standard_keypoints(
+                standard_sequence=standard_sequence,
+                elapsed_ms=elapsed_ms,
+                sync_offset_ms=sync_offset_ms,
+            )
+            score = calculate_similarity(client_keypoints, standard_frame)
+            processed_frames += 1
+            total_score += score
+            average_score = total_score / processed_frames if processed_frames > 0 else score
+            completion = 0.0
+            if len(standard_sequence) > 0:
+                completion = min(100.0, ((std_idx + 1) / len(standard_sequence)) * 100)
+
+            await manager.send_message(channel, {
+                "type": "score",
+                "data": {
+                    "current_score": round(score, 2),
+                    "average_score": round(average_score, 2),
+                    "completion_rate": round(completion, 2),
+                    "frame_index": std_idx,
+                    "elapsed_ms": elapsed_ms,
+                    "processed_frames": processed_frames,
+                    "music_time_ms": max(0, elapsed_ms + sync_offset_ms),
+                },
+                "timestamp": _utc_now()
+            })
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected: %s", channel)
+    except json.JSONDecodeError:
+        await _send_error(channel, "无效的 JSON 格式", "invalid_json")
+    except Exception:
+        logger.exception("WebSocket 会话处理异常: %s", channel)
+        await _send_error(channel, "服务内部错误", "internal_error")
+    finally:
+        manager.disconnect(websocket, channel)
+
+
+def _load_standard_by_video(db: Session, video_id: int) -> tuple[list[dict], int]:
+    video = video_crud.get_video_by_id(db, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    standard_result = recognize_video(video.file_path)
+    return standard_result.get("sequence", []), 0
+
+
+def _load_standard_by_action(db: Session, action_id: int) -> tuple[list[dict], int]:
+    action = action_crud.get_action_by_id(db, action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="动作不存在")
+    if not action.video_path:
+        raise HTTPException(status_code=400, detail="动作未绑定标准视频，无法实时检测")
+    standard_result = recognize_video(action.video_path)
+    return standard_result.get("sequence", []), int(action.sync_offset_ms or 0)
+
+
 @router.websocket("/live/{video_id}")
 async def websocket_live_detection(websocket: WebSocket, video_id: int):
     """
-    实时检测 WebSocket 端点
-
-    前端发送:
-    - type: "keypoints" - 关键点数据
-    - type: "frame" - 视频帧数据(base64编码)
-    - type: "ping" -心跳保活
-
-    后端返回:
-    - type: "score" - 评分结果
-    - type: "error" - 错误信息
-    - type: "pong" - 心跳响应
+    兼容旧接口：基于视频ID进行实时检测
     """
-    # 验证视频存在
-    db = next(get_db())
+    db = SessionLocal()
     try:
-        video = video_crud.get_video_by_id(db, video_id)
-        if not video:
+        try:
+            standard_sequence, sync_offset_ms = _load_standard_by_video(db, video_id)
+        except HTTPException as exc:
+            await websocket.accept()
             await websocket.send_json({
                 "type": "error",
-                "data": {"message": "视频不存在"},
-                "timestamp": datetime.utcnow().isoformat()
+                "data": {"message": exc.detail, "error_code": "resource_not_found"},
+                "timestamp": _utc_now()
             })
             await websocket.close(code=4004)
             return
+        await _handle_live_session(
+            websocket=websocket,
+            channel=f"video:{video_id}",
+            standard_sequence=standard_sequence,
+            sync_offset_ms=sync_offset_ms,
+        )
+    finally:
+        db.close()
 
-        # 建立连接
-        await manager.connect(websocket, video_id)
 
-        # 发送连接成功消息
-        await websocket.send_json({
-            "type": "status",
-            "data": {
-                "status": "connected",
-                "video_id": video_id,
-                "message": "实时检测连接已建立"
-            },
-            "timestamp": datetime.utcnow().isoformat()
-        })
-
-        # 获取标准动作的关键点数据
-        standard_keypoints = None
+@router.websocket("/live/action/{action_id}")
+async def websocket_live_detection_by_action(websocket: WebSocket, action_id: int):
+    """
+    新接口：基于动作ID进行实时检测
+    """
+    db = SessionLocal()
+    try:
         try:
-            result = recognize_video(video.file_path)
-            standard_keypoints = result.get("sequence", [])
-        except Exception as e:
-            print(f"获取标准动作关键点失败: {e}")
-
-        # 消息处理循环
-        while True:
-            try:
-                # 接收前端消息
-                message = await asyncio.wait_for(
-                    websocket.receive_text(),
-                    timeout=30.0  # 30秒超时
-                )
-                data = json.loads(message)
-
-                message_type = data.get("type")
-
-                if message_type == "ping":
-                    # 心跳响应
-                    await websocket.send_json({
-                        "type": "pong",
-                        "data": {"message": "pong"},
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-
-                elif message_type == "keypoints":
-                    # 前端上传的关键点数据
-                    client_keypoints = data.get("data", {})
-
-                    if standard_keypoints and len(standard_keypoints) > 0:
-                        # 与标准动作对比计算分数
-                        current_frame_idx = data.get("data", {}).get("frame_index", 0)
-                        frame_idx = min(current_frame_idx, len(standard_keypoints) - 1)
-                        standard_frame = standard_keypoints[frame_idx].get("keypoints", {})
-
-                        # 简单的相似度计算（实际应该使用更复杂的算法）
-                        score = calculate_similarity(client_keypoints, standard_frame)
-
-                        # 计算平均分
-                        avg_score = score  # 简化版本
-
-                        score_data = {
-                            "current_score": round(score, 2),
-                            "average_score": round(avg_score, 2),
-                            "completion_rate": min(100, (current_frame_idx + 1) / len(standard_keypoints) * 100),
-                            "frame_index": current_frame_idx
-                        }
-
-                        # 发送评分结果
-                        await manager.send_message(video_id, {
-                            "type": "score",
-                            "data": score_data,
-                            "timestamp": datetime.utcnow().isoformat()
-                        })
-
-                elif message_type == "frame":
-                    # 前端上传的视频帧（Base64编码）
-                    # 这种方式不适合大文件，通常只用于小尺寸缩略图
-                    frame_data = data.get("data", {})
-                    frame_idx = frame_data.get("frame_index", 0)
-
-                    # 可以在这里进行后端推理
-                    # 但通常推荐在前端使用 MediaPipe 进行姿态检测
-                    await websocket.send_json({
-                        "type": "status",
-                        "data": {
-                            "status": "frame_received",
-                            "frame_index": frame_idx
-                        },
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-
-                else:
+            standard_sequence, sync_offset_ms = _load_standard_by_action(db, action_id)
+            override_offset = websocket.query_params.get("sync_offset_ms")
+            if override_offset is not None:
+                try:
+                    sync_offset_ms = int(override_offset)
+                except ValueError:
+                    await websocket.accept()
                     await websocket.send_json({
                         "type": "error",
-                        "data": {"message": f"未知消息类型: {message_type}"},
-                        "timestamp": datetime.utcnow().isoformat()
+                        "data": {"message": "sync_offset_ms 必须是整数", "error_code": "invalid_query_param"},
+                        "timestamp": _utc_now()
                     })
-
-            except asyncio.TimeoutError:
-                # 发送心跳保持连接
-                try:
-                    await websocket.send_json({
-                        "type": "ping",
-                        "data": {},
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-                except Exception:
-                    break
-
-            except WebSocketDisconnect:
-                break
-
-            except json.JSONDecodeError:
-                await websocket.send_json({
-                    "type": "error",
-                    "data": {"message": "无效的 JSON 格式"},
-                    "timestamp": datetime.utcnow().isoformat()
-                })
-
-            except Exception as e:
-                print(f"WebSocket 处理错误: {e}")
-                await websocket.send_json({
-                    "type": "error",
-                    "data": {"message": str(e)},
-                    "timestamp": datetime.utcnow().isoformat()
-                })
-
-    except Exception as e:
-        print(f"WebSocket 连接错误: {e}")
-
+                    await websocket.close(code=4400)
+                    return
+        except HTTPException as exc:
+            await websocket.accept()
+            await websocket.send_json({
+                "type": "error",
+                "data": {"message": exc.detail, "error_code": "resource_not_found"},
+                "timestamp": _utc_now()
+            })
+            await websocket.close(code=4004)
+            return
+        await _handle_live_session(
+            websocket=websocket,
+            channel=f"action:{action_id}",
+            standard_sequence=standard_sequence,
+            sync_offset_ms=sync_offset_ms,
+        )
     finally:
-        manager.disconnect(websocket, video_id)
+        db.close()
 
 
 def calculate_similarity(client_kp: dict, standard_kp: dict) -> float:
     """
-    计算两个姿态关键点集合的相似度
-
-    使用简单的关键点距离作为相似度度量。
-    实际应用中应该使用更复杂的算法，如:
-    - PCK (Percentage of Correct Keypoints)
-    - OKS (Object Keypoint Similarity)
-    - 基于骨骼的向量夹角等
-
-    返回: 0-100 的相似度分数
+    计算两个姿态关键点集合的相似度（0-100）
     """
     if not client_kp or not standard_kp:
         return 0.0
 
     total_distance = 0.0
     valid_points = 0
-
-    # 定义需要对比的关键点对
     keypoint_pairs = [
         ("left_shoulder", "left_shoulder"),
         ("right_shoulder", "right_shoulder"),
@@ -253,43 +302,45 @@ def calculate_similarity(client_kp: dict, standard_kp: dict) -> float:
     for client_name, standard_name in keypoint_pairs:
         client_point = client_kp.get(client_name)
         standard_point = standard_kp.get(standard_name)
-
-        if (client_point and standard_point and
-            len(client_point) >= 2 and len(standard_point) >= 2 and
-            client_point[2] > 0.3 and standard_point[2] > 0.3):
-
-            # 计算欧氏距离
-            distance = ((client_point[0] - standard_point[0]) ** 2 +
-                       (client_point[1] - standard_point[1]) ** 2) ** 0.5
+        if (
+            client_point and standard_point and
+            len(client_point) >= 3 and len(standard_point) >= 3 and
+            client_point[2] > 0.3 and standard_point[2] > 0.3
+        ):
+            distance = (
+                (client_point[0] - standard_point[0]) ** 2 +
+                (client_point[1] - standard_point[1]) ** 2
+            ) ** 0.5
             total_distance += distance
             valid_points += 1
 
     if valid_points == 0:
         return 0.0
 
-    # 计算平均距离并转换为相似度分数
     avg_distance = total_distance / valid_points
-
-    # 距离越小，分数越高
-    # 使用指数衰减将距离映射到 0-100
     score = max(0, min(100, 100 * (1 - avg_distance * 2)))
-
     return score
 
 
-@router.get("/live/status/{video_id}")
-async def get_live_status(video_id: int):
-    """获取实时检测状态"""
-    db = next(get_db())
-    video = video_crud.get_video_by_id(db, video_id)
+@router.get("/live/status/action/{action_id}")
+async def get_live_status_by_action(action_id: int):
+    """
+    获取动作实时检测连接状态
+    """
+    return {
+        "action_id": action_id,
+        "connected_clients": len(manager.active_connections.get(f"action:{action_id}", set())),
+        "is_streaming": len(manager.active_connections.get(f"action:{action_id}", set())) > 0
+    }
 
-    if not video:
-        raise HTTPException(status_code=404, detail="视频不存在")
 
-    connected_count = len(manager.active_connections.get(video_id, set()))
-
+@router.get("/live/status/video/{video_id}")
+async def get_live_status_by_video(video_id: int):
+    """
+    获取视频实时检测连接状态（兼容）
+    """
     return {
         "video_id": video_id,
-        "connected_clients": connected_count,
-        "is_streaming": connected_count > 0
+        "connected_clients": len(manager.active_connections.get(f"video:{video_id}", set())),
+        "is_streaming": len(manager.active_connections.get(f"video:{video_id}", set())) > 0
     }

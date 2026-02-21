@@ -1,5 +1,11 @@
 import api from '../api';
-import { VideoWithSync } from '../types';
+import {
+  ActionMusicSyncAlignRequest,
+  ActionMusicSyncListItem,
+  ActionMusicSyncLookup,
+  ActionMusicSyncOut,
+  VideoWithSync,
+} from '../types';
 
 // 同步配置相关 API
 
@@ -12,6 +18,28 @@ export async function syncAlign(params: {
 }): Promise<any> {
   const response = await api.post('/sync/align', params);
   return response.data;
+}
+
+// 动作-音乐组合对齐保存
+export async function alignActionMusic(params: ActionMusicSyncAlignRequest): Promise<ActionMusicSyncOut> {
+  const response = await api.post('/sync/action-music/align', params);
+  return response.data;
+}
+
+// 查询动作-音乐组合对齐
+export async function getActionMusicSync(actionId: number, musicId: number): Promise<ActionMusicSyncLookup> {
+  const response = await api.get('/sync/action-music', {
+    params: { action_id: actionId, music_id: musicId },
+  });
+  return response.data;
+}
+
+// 查询动作可用音乐及对齐状态
+export async function listActionMusicSync(actionId: number): Promise<ActionMusicSyncListItem[]> {
+  const response = await api.get('/sync/action-music/list', {
+    params: { action_id: actionId },
+  });
+  return response.data || [];
 }
 
 // 获取视频的同步配置

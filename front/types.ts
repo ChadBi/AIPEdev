@@ -21,17 +21,20 @@ export interface Action {
   description: string;
   video_path?: string; // Standard video path
   keypoints: any;
+  music_id?: number | null;
+  sync_offset_ms?: number;
+  is_aligned?: boolean;
   created_at: string;
 }
 
 export interface VideoRecord {
   id: number;
   user_id: number;
-  filename: string;
+  filename?: string; // backward-compatible optional field
   file_path: string;
   fps: number | null;
   total_frames: number | null;
-  upload_time: string;
+  upload_time?: string; // backward-compatible optional field
   created_at: string;
 }
 
@@ -114,6 +117,43 @@ export interface SyncAlignResponse {
   message: string;
 }
 
+export interface ActionMusicSyncLookup {
+  action_id: number;
+  music_id: number;
+  sync_offset_ms: number;
+  is_aligned: boolean;
+  alignment_note: string | null;
+  has_sync_config: boolean;
+}
+
+export interface ActionMusicSyncAlignRequest {
+  action_id: number;
+  music_id: number;
+  sync_offset_ms: number;
+  alignment_note?: string;
+}
+
+export interface ActionMusicSyncOut {
+  id: number;
+  action_id: number;
+  music_id: number;
+  sync_offset_ms: number;
+  is_aligned: boolean;
+  alignment_note: string | null;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActionMusicSyncListItem {
+  music_id: number;
+  music_name: string;
+  music_file_path: string;
+  sync_offset_ms: number;
+  is_aligned: boolean;
+  has_sync_config: boolean;
+}
+
 // 包含同步信息的视频类型
 export interface VideoWithSync {
   id: number;
@@ -155,7 +195,7 @@ export interface LiveScore {
 
 // 实时会话状态
 export interface LiveSession {
-  video_id: number;
+  action_id: number;
   music_id: number | null;
   sync_offset_ms: number;
   is_aligned: boolean;
@@ -169,12 +209,12 @@ export interface LiveSession {
 export interface WSMessage {
   type: 'frame' | 'score' | 'error' | 'status' | 'pong';
   data: any;
-  timestamp: number;
+  timestamp: number | string;
 }
 
 // 实时检测配置
 export interface LiveDetectionConfig {
-  video_id: number;
+  action_id: number;
   camera_device_id: string | null;
   enable_audio: boolean;
   sync_offset_ms: number;
@@ -196,4 +236,21 @@ export interface LiveStats {
   average_score: number;
   music_playing: boolean;
   music_volume: number;
+}
+
+export interface LiveActionConfig {
+  action_id: number;
+  music_id: number | null;
+  sync_offset_ms: number;
+  is_aligned: boolean;
+}
+
+export interface LiveWsScorePayload {
+  current_score: number;
+  average_score: number;
+  completion_rate: number;
+  frame_index: number;
+  elapsed_ms: number;
+  processed_frames: number;
+  music_time_ms: number;
 }
