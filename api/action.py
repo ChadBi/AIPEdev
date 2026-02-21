@@ -22,6 +22,19 @@ from utils.file import normalize_storage_path
 router = APIRouter()
 
 
+def start_action_background_recognition(action_id: int):
+    """启动动作的后台批处理识别任务"""
+    try:
+        from services.background_recognition import queue_action_recognition
+        # 使用 asyncio 创建后台任务
+        import asyncio
+        asyncio.create_task(queue_action_recognition(action_id))
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception(f"启动动作 {action_id} 后台识别任务失败: {e}")
+
+
 @router.get("/{action_id:int}/keypoints")
 def get_action_keypoints(action_id: int, db: Session = Depends(get_db)):
     """
@@ -134,29 +147,28 @@ def create_action_from_video(
 ):
     """
     从标准视频创建动作
-    
-    上传一个标准动作的视频，系统自动进行姿态识别，
-    将识别结果作为该动作的关键点定义。
-    
+
+    上传一个标准动作的视频，系统后台异步进行姿态识别。
+
     参数:
     - name: 动作名称
     - description: 动作描述
     - file: 标准视频文件
-    
+
     返回:
-    - 创建的动作记录
+    - 创建的动作记录（识别状态为 pending）
     """
     # 验证文件类型
     if not file.content_type or not file.content_type.startswith("video/"):
         raise HTTPException(status_code=400, detail="File must be a video")
-    
+
     # 生成永久文件名用于保存
     file_ext = os.path.splitext(file.filename)[1] if file.filename else ""
     if not file_ext:
         file_ext = ".mp4"
     permanent_file_name = f"{uuid.uuid4()}{file_ext}"
     permanent_file_path = os.path.join(UPLOAD_DIR, permanent_file_name)
-    
+
     # 保存视频文件
     try:
         os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -164,24 +176,25 @@ def create_action_from_video(
             shutil.copyfileobj(file.file, buffer)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save video: {str(e)}")
-    
-    # 不再在创建时识别关键点，延迟到评分时进行
-    # 这样可以确保标准动作和用户动作使用相同的识别参数
-    
-    # 创建动作并保存视频路径（不保存关键点）
+
+    # 创建动作并保存视频路径
     action_in = ActionCreate(
         name=name,
         description=description,
-        keypoints=None  # 评分时动态识别
+        keypoints=None
     )
-    
+
     action = action_service.create_action(db, action_in)
-    
-    # 保存视频路径到动作记录
     action.video_path = normalize_storage_path(permanent_file_path)
+    # 设置识别状态为待处理
+    action.recognition_status = "pending"
+    action.recognition_error = None
     db.commit()
     db.refresh(action)
-    
+
+    # 启动后台批处理识别任务
+    start_action_background_recognition(action.id)
+
     return action
 
 @router.post("/", response_model=ActionOut)

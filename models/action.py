@@ -18,13 +18,18 @@ class Action(Base):
     # 动作描述
     description = Column(String(255), nullable=True)
 
-    # YOLOv8 Pose 标准动作关键点序列
-    # 格式: { "sequence": [ { "keypoints": {...} }, ... ] }
-    # 注意：新方案中不再预存关键点，在评分时动态识别
-    keypoints = Column(JSON, nullable=True)
-    
     # 标准视频文件路径（用于对照播放）
     video_path = Column(String(500), nullable=True)
+
+    # YOLOv8 Pose 标准动作关键点序列（后台批处理后保存）
+    # 格式: { "sequence": [ { "keypoints": {...} }, ... ] }
+    keypoints = Column(JSON, nullable=True)
+
+    # 关键点识别状态: pending（待处理）, processing（处理中）, completed（已完成）, failed（失败）
+    recognition_status = Column(String(20), default="pending", nullable=False)
+
+    # 识别失败的错误信息
+    recognition_error = Column(String(500), nullable=True)
 
     # 实时检测使用的音乐绑定（可选）
     music_id = Column(Integer, ForeignKey("music.id"), nullable=True)

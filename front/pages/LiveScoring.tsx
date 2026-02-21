@@ -102,6 +102,7 @@ const LiveScoring: React.FC = () => {
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [stats, setStats] = useState<LiveStats>(DEFAULT_STATS);
   const [keypoints, setKeypoints] = useState<Keypoints | null>(null);
@@ -390,13 +391,13 @@ const LiveScoring: React.FC = () => {
         captureCanvasRef.current = document.createElement('canvas');
       }
       const canvas = captureCanvasRef.current;
-      canvas.width = 320;
-      canvas.height = 240;
-      const context = canvas.getContext('2d');
+      canvas.width = 640;
+      canvas.height = 480;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
       if (!context) return;
       context.drawImage(liveVideo, 0, 0, canvas.width, canvas.height);
 
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
       const elapsedMs = Math.round(performance.now() - startTimeRef.current);
       wsRef.current.send(JSON.stringify({
         type: 'frame',
@@ -406,7 +407,7 @@ const LiveScoring: React.FC = () => {
         },
       }));
       sentFramesRef.current += 1;
-    }, 200);
+    }, 50); // 每 50ms 发送一帧，约 20 FPS
   }, [clearFrameLoops]);
 
   const playAudio = useCallback(() => {
@@ -432,24 +433,36 @@ const LiveScoring: React.FC = () => {
   const startMusic = useCallback(() => {
     if (!selectedMusic) return;
 
+    // 清理旧的音频元素
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+
     const offsetMs = selectedSync?.sync_offset_ms || 0;
     const audio = new Audio(getMusicUrl(selectedMusic.music_file_path));
     audio.volume = stats.music_volume;
     audio.preload = 'auto';
-    audioRef.current = audio;
 
+    // 确保音频从头开始
+    audio.currentTime = 0;
+
+    // 处理音乐对齐偏移
     if (offsetMs > 0) {
-      audio.currentTime = offsetMs / 1000;
+      // 视频比音乐晚（音乐先播放，音乐播放到偏移点时视频开始）
+      // 音乐立即播放，从 0 开始
       playAudio();
-      return;
-    }
-
-    if (offsetMs < 0) {
+    } else if (offsetMs < 0) {
+      // 视频比音乐早（视频先播放，视频播放到偏移点时音乐开始）
+      // 音乐延迟播放 |offsetMs| 毫秒
       scheduleMusicPlay(Math.abs(offsetMs));
-      return;
+    } else {
+      // 无偏移，同时播放
+      playAudio();
     }
 
-    playAudio();
+    audioRef.current = audio;
   }, [playAudio, scheduleMusicPlay, selectedMusic, selectedSync?.sync_offset_ms, stats.music_volume]);
 
   const handleStart = useCallback(() => {
@@ -480,21 +493,61 @@ const LiveScoring: React.FC = () => {
     } else {
       setWarning('');
     }
-    setIsPlaying(true);
+
+    // 开始倒计时
+    setIsPlaying(false);
     setIsPaused(false);
+    setCountdown(5);
     setStats(prev => ({ ...DEFAULT_STATS, music_volume: prev.music_volume }));
+    setKeypoints(null);
 
-    startTimeRef.current = performance.now();
-    connectWebSocket(selectedAction.id, selectedSync.sync_offset_ms || 0);
-    startFrameLoop();
-    startMusic();
+    // 倒计时计时器
+    let count = 5;
+    const countdownTimer = setInterval(() => {
+      count -= 1;
+      if (count <= 0) {
+        clearInterval(countdownTimer);
+        setCountdown(null);
+        // 倒计时结束，开始检测
+        setIsPlaying(true);
+        startTimeRef.current = performance.now();
 
-    if (standardVideoRef.current) {
-      standardVideoRef.current.currentTime = 0;
-      standardVideoRef.current.play().catch(() => {
-        setWarning('标准动作视频播放失败，请重试');
-      });
-    }
+        // 确保所有媒体都从头开始
+        if (standardVideoRef.current) {
+          standardVideoRef.current.pause();
+          standardVideoRef.current.currentTime = 0;
+        }
+
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+        }
+
+        // 短暂延迟后开始播放，确保媒体已加载
+        setTimeout(() => {
+          // 确保标准视频从头开始
+          if (standardVideoRef.current) {
+            const video = standardVideoRef.current;
+            video.pause();
+            video.currentTime = 0;
+            // 等待视频定位到开头后才播放
+            const onSeeked = () => {
+              video.removeEventListener('seeked', onSeeked);
+              video.play().catch(() => {
+                setWarning('标准动作视频播放失败，请重试');
+              });
+            };
+            video.addEventListener('seeked', onSeeked);
+          }
+
+          connectWebSocket(selectedAction.id, selectedSync.sync_offset_ms || 0);
+          startFrameLoop();
+          startMusic();
+        }, 200);
+      } else {
+        setCountdown(count);
+      }
+    }, 1000);
   }, [
     cameraReady,
     connectWebSocket,
@@ -777,8 +830,18 @@ const LiveScoring: React.FC = () => {
         </div>
       </header>
 
-      <div className="flex-1 p-6 overflow-hidden">
-        <div className="h-full grid grid-rows-2 gap-4">
+      <div className="flex-1 p-6 overflow-hidden relative">
+        {/* 倒计时覆盖层 */}
+        {countdown !== null && (
+          <div className="absolute inset-0 flex items-center justify-center z-50 bg-slate-900/80 backdrop-blur-sm">
+            <div className="text-center">
+              <div className="text-8xl font-bold text-white mb-4 animate-pulse">{countdown}</div>
+              <div className="text-white text-lg">即将开始检测...</div>
+            </div>
+          </div>
+        )}
+
+        <div className={`h-full grid grid-rows-2 gap-4 ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
           {/* 上行：两个视频面板并排 */}
           <div className="grid grid-cols-2 gap-4">
             {/* 标准动作视频（静音） */}
@@ -896,7 +959,10 @@ const LiveScoring: React.FC = () => {
                 <StatCard label="FPS" value={String(stats.fps)} />
                 <StatCard label="分数" value={stats.current_score.toFixed(0)} />
                 <StatCard label="平均" value={stats.average_score.toFixed(0)} />
-                <StatCard label="延迟" value={`${Math.round(stats.latency_ms)}ms`} />
+                <StatCard label="处理帧数" value={String(stats.frames_processed)} />
+                <StatCard label="网络延迟" value={`${Math.round(stats.latency_ms)}ms`} />
+                <StatCard label="音乐状态" value={stats.music_playing ? '播放中' : '未播放'} />
+                <StatCard label="模型状态" value={modelLoaded ? '就绪' : '加载中'} />
               </div>
             </div>
           </div>

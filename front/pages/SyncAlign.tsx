@@ -484,8 +484,8 @@ const SyncAlign: React.FC = () => {
                 <p className="text-xs text-slate-500 mb-4">{getOffsetDescription()}</p>
                 <input
                   type="range"
-                  min="-3000"
-                  max="3000"
+                  min="-10000"
+                  max="10000"
                   step="50"
                   value={videoOffsetMs}
                   onChange={(e) => {
@@ -495,9 +495,9 @@ const SyncAlign: React.FC = () => {
                   className="w-full accent-indigo-600"
                 />
                 <div className="flex justify-between text-xs text-slate-400 mt-2">
-                  <span>视频提前 3s</span>
+                  <span>提前 10s</span>
                   <span>同步</span>
-                  <span>视频延迟 3s</span>
+                  <span>延迟 10s</span>
                 </div>
               </div>
 
