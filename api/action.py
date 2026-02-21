@@ -16,9 +16,26 @@ from services import action_service
 from crud import action as action_crud
 from crud import music as music_crud
 from crud import video as video_crud
+from services.recognition_service import recognize_video
 from utils.file import normalize_storage_path
 
 router = APIRouter()
+
+
+@router.get("/{action_id:int}/keypoints")
+def get_action_keypoints(action_id: int, db: Session = Depends(get_db)):
+    """
+    获取动作视频的关键点序列（用于骨架显示）
+    """
+    action = action_service.get_action(db, action_id)
+    if not action or not action.video_path:
+        raise HTTPException(status_code=404, detail="动作或视频不存在")
+
+    try:
+        result = recognize_video(action.video_path)
+        return {"sequence": result.get("sequence", [])}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"识别失败：{str(e)}")
 
 
 @router.get("/count", response_model=dict)

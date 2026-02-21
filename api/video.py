@@ -13,6 +13,7 @@ from crud import video as video_crud
 from crud import music as music_crud
 from crud import sync_config as sync_crud
 from services.recognition_service import get_video_metadata
+from utils.file import normalize_storage_path
 
 router = APIRouter()
 
@@ -71,7 +72,7 @@ def upload_video(
 
     # 创建数据库记录
     video_in = VideoCreate(
-        file_path=file_path,
+        file_path=normalize_storage_path(file_path),
         fps=metadata.get("fps"),
         total_frames=metadata.get("total_frames"),
         music_id=music_id
@@ -105,6 +106,17 @@ def list_my_videos(
     """
     return video_crud.get_user_videos(db, current_user.id, skip, limit)
 
+
+@router.get("/me/count", response_model=dict)
+def get_my_video_count(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取当前用户视频总数
+    """
+    return {"count": video_crud.get_user_video_count(db, current_user.id)}
+
 @router.get("/{video_id}", response_model=VideoWithSyncOut)
 def get_video_with_sync(
     video_id: int,
@@ -124,25 +136,26 @@ def get_video_with_sync(
         music = music_crud.get_music_by_id(db, video.music_id)
         if music:
             music_name = music.name
-            music_file_path = music.file_path
+            music_file_path = normalize_storage_path(music.file_path)
 
     # 获取同步配置
     sync_offset_ms = None
     is_aligned = False
-    if video.sync_config_id:
-        sync_config = sync_crud.get_sync_config_by_id(db, video.sync_config_id)
-        if sync_config:
-            sync_offset_ms = sync_config.sync_offset_ms
-            is_aligned = sync_config.is_manually_aligned
+    sync_config = sync_crud.get_sync_config_by_video_id(db, video.id)
+    resolved_sync_id = None
+    if sync_config:
+        resolved_sync_id = sync_config.id
+        sync_offset_ms = sync_config.sync_offset_ms
+        is_aligned = sync_config.is_manually_aligned
 
     return VideoWithSyncOut(
         id=video.id,
         user_id=video.user_id,
-        file_path=video.file_path,
+        file_path=normalize_storage_path(video.file_path),
         fps=video.fps,
         total_frames=video.total_frames,
         music_id=video.music_id,
-        sync_config_id=video.sync_config_id,
+        sync_config_id=resolved_sync_id,
         created_at=video.created_at,
         music_name=music_name,
         music_file_path=music_file_path,

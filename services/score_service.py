@@ -1,5 +1,8 @@
 import math
 from core.config import SAMPLE_FPS
+import logging
+
+logger = logging.getLogger(__name__)
 
 # YOLOv8 关键点名称列表
 YOLOV8_KEYPOINTS = [
@@ -234,27 +237,27 @@ def score_action_by_angle(standard_action: dict, user_action: dict) -> dict:
     if valid_ratio < SCORING_CONFIG["min_valid_frames_ratio"]:
         # 有效帧太少，强制降低分数并添加警告
         total_score = min(total_score, 50.0)
-        print(f"⚠️  警告: 有效帧比例过低 ({valid_ratio:.1%})，评分可能不准确")
+        logger.info(f"⚠️  警告: 有效帧比例过低 ({valid_ratio:.1%})，评分可能不准确")
 
     feedback = _generate_angle_feedback(joint_scores, valid_frame_count, length)
     
     # 添加调试信息
-    print(f"\n{'='*60}")
-    print(f"📊 评分详情 (完善版):")
-    print(f"{'='*60}")
-    print(f"总帧数: {length} | 跳过帧数: {total_skipped_frames} | 有效率: {valid_ratio:.1%}")
-    print(f"评估关节: {len(ANGLE_JOINTS)} 个 (含权重)")
-    print(f"惩罚系数: {SCORING_CONFIG['angle_penalty']} (角度差1°扣{SCORING_CONFIG['angle_penalty']}分)")
-    print(f"\n各关节得分 (带权重):")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"📊 评分详情 (完善版):")
+    logger.info(f"{'='*60}")
+    logger.info(f"总帧数: {length} | 跳过帧数: {total_skipped_frames} | 有效率: {valid_ratio:.1%}")
+    logger.info(f"评估关节: {len(ANGLE_JOINTS)} 个 (含权重)")
+    logger.info(f"惩罚系数: {SCORING_CONFIG['angle_penalty']} (角度差1°扣{SCORING_CONFIG['angle_penalty']}分)")
+    logger.info(f"\n各关节得分 (带权重):")
     for joint, score in joint_scores.items():
         valid_count = valid_frame_count[joint]
         avg_diff = angle_diff_sum[joint] / valid_count if valid_count > 0 else 0
         weight = ANGLE_JOINTS[joint]["weight"]
         group = ANGLE_JOINTS[joint]["group"]
-        print(f"  {_joint_name_cn(joint):6s} [{group}]: {score:5.1f}分 (权重×{weight}) | "
+        logger.info(f"  {_joint_name_cn(joint):6s} [{group}]: {score:5.1f}分 (权重×{weight}) | "
               f"有效帧: {valid_count}/{length} | 平均角度差: {avg_diff:.1f}°")
-    print(f"\n加权总分: {total_score:.2f}")
-    print(f"{'='*60}\n")
+    logger.info(f"\n加权总分: {total_score:.2f}")
+    logger.info(f"{'='*60}\n")
 
     return {
         "total_score": total_score,
@@ -367,3 +370,4 @@ def _angle(a, b, c):
     # 限制余弦值在 [-1, 1] 范围内，防止浮点误差导致 acos 报错
     cos_angle = max(-1.0, min(1.0, dot / (mag_ba * mag_bc)))
     return math.degrees(math.acos(cos_angle))
+

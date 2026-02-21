@@ -45,6 +45,13 @@ def get_actions(db: Session, skip: int = 0, limit: int = 20):
     """
     return db.query(Action).offset(skip).limit(limit).all()
 
+
+def get_action_count(db: Session) -> int:
+    """
+    获取动作总数
+    """
+    return db.query(Action).count()
+
 def update_action(db: Session, action: Action):
     """
     更新标准动作

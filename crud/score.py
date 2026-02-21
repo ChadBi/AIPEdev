@@ -60,6 +60,17 @@ def get_user_scores(db: Session, user_id: int, skip: int = 0, limit: int = 50):
         .all()
     )
 
+
+def get_user_score_count(db: Session, user_id: int) -> int:
+    """
+    获取指定用户评分记录总数
+    """
+    return (
+        db.query(ScoreRecord)
+        .filter(ScoreRecord.user_id == user_id)
+        .count()
+    )
+
 def get_score_by_id(db: Session, score_id: int):
     """
     根据 ID 获取评分记录

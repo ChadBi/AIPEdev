@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from services.recognition_service import recognize_video
+from services.recognition_service import recognize_video, is_pose_model_loaded
 from schemas.recognition import RecognizeOut
 from core.database import get_db
 from crud.video import get_video_by_id
 
 router = APIRouter()
+
+@router.get("/model-status")
+def model_status():
+    """检查 YOLO 模型加载状态"""
+    return {"model_loaded": is_pose_model_loaded()}
 
 @router.post("/", response_model=RecognizeOut)
 def recognize(

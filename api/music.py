@@ -11,6 +11,7 @@ from models.user import User
 from models.music import Music
 from schemas.music import MusicOut, MusicCreate, MusicListResponse
 from crud import music as music_crud
+from utils.file import normalize_storage_path
 
 router = APIRouter()
 
@@ -112,7 +113,7 @@ def upload_music(
     # 创建数据库记录
     music_create = MusicCreate(
         name=music_name,
-        file_path=file_path,
+        file_path=normalize_storage_path(file_path),
         duration_seconds=duration,
         file_size=file_size,
         is_default=False

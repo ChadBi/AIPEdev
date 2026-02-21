@@ -58,6 +58,14 @@ def manual_align(
         created_by=current_user.id
     )
 
+    # 回写视频主记录，保证读取链路一致
+    video_crud.update_video(
+        db,
+        request.video_id,
+        music_id=request.music_id,
+        sync_config_id=sync_config.id
+    )
+
     return SyncAlignResponse(
         sync_config_id=sync_config.id,
         video_id=request.video_id,
@@ -101,7 +109,7 @@ def create_sync_config(
     if not music:
         raise HTTPException(status_code=404, detail="音乐不存在")
 
-    return sync_crud.create_sync_config(
+    created = sync_crud.create_sync_config(
         db=db,
         video_id=sync_config.video_id,
         music_id=sync_config.music_id,
@@ -110,6 +118,15 @@ def create_sync_config(
         alignment_note=sync_config.alignment_note,
         created_by=current_user.id
     )
+
+    video_crud.update_video(
+        db,
+        sync_config.video_id,
+        music_id=sync_config.music_id,
+        sync_config_id=created.id
+    )
+
+    return created
 
 
 @router.put("/{sync_id}", response_model=SyncConfigOut)
@@ -128,6 +145,14 @@ def update_sync_config(
     if not sync_config:
         raise HTTPException(status_code=404, detail="同步配置不存在")
 
+    # 如果同步配置更新了音乐或关联，回写到视频记录
+    video_crud.update_video(
+        db,
+        sync_config.video_id,
+        music_id=sync_config.music_id,
+        sync_config_id=sync_config.id
+    )
+
     return sync_config
 
 
@@ -140,6 +165,13 @@ def delete_sync_config(
     """
     删除同步配置
     """
+    sync_config = sync_crud.get_sync_config_by_id(db, sync_id)
+    if not sync_config:
+        raise HTTPException(status_code=404, detail="同步配置不存在")
+
+    # 清空视频上的 sync_config_id 引用
+    video_crud.update_video(db, sync_config.video_id, sync_config_id=None)
+
     success = sync_crud.delete_sync_config(db, sync_id)
     if not success:
         raise HTTPException(status_code=404, detail="同步配置不存在")

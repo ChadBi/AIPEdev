@@ -3,6 +3,7 @@ from fastapi import HTTPException
 from models.action import Action
 from crud import action as action_crud
 from schemas.action import ActionCreate, ActionUpdate
+from crud import music as music_crud
 
 def create_action(db: Session, action_in: ActionCreate):
     """
@@ -21,7 +22,10 @@ def create_action(db: Session, action_in: ActionCreate):
     action = Action(
         name=action_in.name,
         description=action_in.description,
-        keypoints=action_in.keypoints
+        keypoints=action_in.keypoints,
+        music_id=action_in.music_id,
+        sync_offset_ms=action_in.sync_offset_ms,
+        is_aligned=action_in.is_aligned
     )
     return action_crud.create_action(db, action)
 
@@ -66,6 +70,18 @@ def update_action(db: Session, action_id: int, action_in: ActionUpdate):
         action.description = action_in.description
     if action_in.keypoints is not None:
         action.keypoints = action_in.keypoints
+    if action_in.music_id is not None:
+        if action_in.music_id <= 0:
+            action.music_id = None
+        else:
+            music = music_crud.get_music_by_id(db, action_in.music_id)
+            if not music:
+                raise HTTPException(status_code=404, detail="Music not found")
+            action.music_id = action_in.music_id
+    if action_in.sync_offset_ms is not None:
+        action.sync_offset_ms = action_in.sync_offset_ms
+    if action_in.is_aligned is not None:
+        action.is_aligned = action_in.is_aligned
 
     return action_crud.update_action(db, action)
 

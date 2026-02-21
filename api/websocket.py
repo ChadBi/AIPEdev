@@ -151,11 +151,13 @@ async def _handle_live_session(
                 await _send_error(channel, "关键点数据格式错误", "invalid_keypoints")
                 continue
 
-            std_idx, standard_frame = _select_standard_keypoints(
+            # 获取标准动作关键点用于骨架绘制
+            _, standard_frame = _select_standard_keypoints(
                 standard_sequence=standard_sequence,
                 elapsed_ms=elapsed_ms,
                 sync_offset_ms=sync_offset_ms,
             )
+
             score = calculate_similarity(client_keypoints, standard_frame)
             processed_frames += 1
             total_score += score
@@ -174,6 +176,8 @@ async def _handle_live_session(
                     "elapsed_ms": elapsed_ms,
                     "processed_frames": processed_frames,
                     "music_time_ms": max(0, elapsed_ms + sync_offset_ms),
+                    "keypoints": client_keypoints,  # 返回客户端关键点用于骨架绘制
+                    "standard_keypoints": standard_frame,  # 返回标准关键点用于骨架绘制
                 },
                 "timestamp": _utc_now()
             })

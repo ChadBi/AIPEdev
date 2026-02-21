@@ -1,6 +1,11 @@
-from typing import Dict, List
+from typing import Dict, List, Any
 import random
+import base64
+import logging
+from functools import lru_cache
 from core.config import USE_MOCK, YOLO_MODEL_PATH, YOLO_DEVICE, SAMPLE_FPS, YOLO_CONFIDENCE, YOLO_IOU
+
+logger = logging.getLogger(__name__)
 
 # =========================
 # 配置
@@ -33,6 +38,71 @@ YOLO_IOU_THRESHOLD = YOLO_IOU # NMS IOU 阈值
 YOLO_IMGSZ = 640       # 推理图片尺寸
 KEEP_TOP1 = True       # 是否只保留置信度最高的一个人
 
+def _get_mock_keypoints() -> Dict[str, list[float]]:
+    """
+    生成一帧 mock 关键点
+    """
+    frame_kp: Dict[str, list[float]] = {}
+    for name in KEYPOINT_MAP.values():
+        frame_kp[name] = [
+            round(random.uniform(0, 1), 3),
+            round(random.uniform(0, 1), 3),
+            round(random.uniform(0.8, 1), 2),
+        ]
+    return frame_kp
+
+
+@lru_cache(maxsize=1)
+def _load_pose_model():
+    """
+    懒加载 YOLO Pose 模型，避免重复初始化导致实时卡顿
+    """
+    from ultralytics import YOLO
+    return YOLO(YOLO_MODEL_PATH)
+
+
+def is_pose_model_loaded() -> bool:
+    """
+    检查 YOLO 模型是否已加载到缓存
+    """
+    return _load_pose_model.cache_info().hits > 0 or _load_pose_model.cache_info().misses > 0
+
+
+def _extract_frame_keypoints(results: Any, width: int, height: int) -> Dict[str, list[float]]:
+    """
+    从 YOLO 推理结果提取单帧关键点（归一化）
+    """
+    frame_kp: Dict[str, list[float]] = {}
+
+    for result in results:
+        if result.keypoints is None or result.boxes is None:
+            continue
+
+        kpts = result.keypoints.xy.cpu().numpy()
+        confs = result.keypoints.conf.cpu().numpy()
+        box_scores = result.boxes.conf.cpu().numpy()
+
+        if len(box_scores) == 0:
+            continue
+
+        if KEEP_TOP1:
+            person_ids = [int(box_scores.argmax())]
+        else:
+            person_ids = range(len(box_scores))
+
+        for pid in person_ids:
+            for idx, name in KEYPOINT_MAP.items():
+                x_px, y_px = kpts[pid][idx]
+                conf = float(confs[pid][idx])
+                if not (0 <= x_px <= width and 0 <= y_px <= height):
+                    continue
+                frame_kp[name] = [
+                    round(float(x_px) / float(width), 4) if width > 0 else 0.0,
+                    round(float(y_px) / float(height), 4) if height > 0 else 0.0,
+                    round(conf, 3),
+                ]
+    return frame_kp
+
 # =========================
 # 对外统一入口
 # =========================
@@ -62,6 +132,59 @@ def recognize_video(video_path: str) -> Dict:
         return _mock_recognition(video_path)
 
     return _yolo_recognition(video_path)
+
+
+def decode_base64_frame(frame_base64: str):
+    """
+    将 base64 图片解码为 OpenCV BGR 图像
+    """
+    try:
+        import cv2
+        import numpy as np
+    except ImportError as exc:
+        raise RuntimeError("缺少图像解码依赖，请安装 opencv-python") from exc
+
+    encoded = frame_base64
+    if "," in frame_base64:
+        encoded = frame_base64.split(",", 1)[1]
+    image_bytes = base64.b64decode(encoded)
+    np_buffer = np.frombuffer(image_bytes, dtype=np.uint8)
+    frame = cv2.imdecode(np_buffer, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise RuntimeError("无效的图像数据，无法解码")
+    return frame
+
+
+def recognize_frame(frame) -> Dict[str, list[float]]:
+    """
+    识别单帧关键点，返回 {keypoint_name: [x, y, conf]}
+    """
+    if USE_MOCK:
+        return _get_mock_keypoints()
+
+    try:
+        model = _load_pose_model()
+        height, width = frame.shape[:2]
+        results = model.predict(
+            source=frame,
+            conf=YOLO_CONF,
+            iou=YOLO_IOU_THRESHOLD,
+            imgsz=YOLO_IMGSZ,
+            device=YOLO_DEVICE,
+            verbose=False
+        )
+        return _extract_frame_keypoints(results, width, height)
+    except Exception as exc:
+        logger.exception("单帧识别失败")
+        raise RuntimeError(f"单帧识别失败: {str(exc)}") from exc
+
+
+def recognize_frame_base64(frame_base64: str) -> Dict[str, list[float]]:
+    """
+    接收 base64 图片并识别关键点
+    """
+    frame = decode_base64_frame(frame_base64)
+    return recognize_frame(frame)
 
 
 def get_video_metadata(video_path: str) -> Dict:
@@ -114,16 +237,7 @@ def _mock_recognition(video_path: str) -> Dict:
 
     # 模拟 10 帧动作
     for _ in range(10):
-        keypoints = {}
-
-        for name in KEYPOINT_MAP.values():
-            keypoints[name] = [
-                round(random.uniform(0, 1), 3),   # x 坐标 (归一化)
-                round(random.uniform(0, 1), 3),   # y 坐标 (归一化)
-                round(random.uniform(0.8, 1), 2)  # 置信度
-            ]
-
-        sequence.append({"keypoints": keypoints})
+        sequence.append({"keypoints": _get_mock_keypoints()})
 
     return {"sequence": sequence}
 
@@ -147,12 +261,14 @@ def _yolo_recognition(video_path: str) -> Dict:
     """
 
     try:
-        from ultralytics import YOLO
         import cv2
     except ImportError:
         raise RuntimeError("请先安装 ultralytics 和 opencv-python: pip install ultralytics opencv-python")
 
-    model = YOLO(YOLO_MODEL_PATH)
+    try:
+        model = _load_pose_model()
+    except ImportError as exc:
+        raise RuntimeError("请先安装 ultralytics 和 opencv-python: uv add ultralytics opencv-python") from exc
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -191,40 +307,7 @@ def _yolo_recognition(video_path: str) -> Dict:
             verbose=False
         )
 
-        frame_kp = {}
-
-        for r in results:
-            if r.keypoints is None or r.boxes is None:
-                continue
-
-            kpts = r.keypoints.xy.cpu().numpy()     # (N, 17, 2)
-            confs = r.keypoints.conf.cpu().numpy()   # (N, 17)
-            box_scores = r.boxes.conf.cpu().numpy()  # (N,)
-
-            # 确定要处理的人物索引
-            if KEEP_TOP1 and len(box_scores) > 0:
-                person_ids = [int(box_scores.argmax())]
-            else:
-                person_ids = range(len(box_scores))
-
-            for pid in person_ids:
-                for idx, name in KEYPOINT_MAP.items():
-                    x_px, y_px = kpts[pid][idx]
-                    conf = float(confs[pid][idx])
-
-                    # 归一化坐标到 [0, 1]
-                    x_norm = float(x_px) / float(w) if w > 0 else 0.0
-                    y_norm = float(y_px) / float(h) if h > 0 else 0.0
-
-                    # 过滤无效点（坐标超出画面）
-                    if not (0 <= x_px <= w and 0 <= y_px <= h):
-                        continue
-
-                    frame_kp[name] = [
-                        round(x_norm, 4),
-                        round(y_norm, 4),
-                        round(conf, 3)
-                    ]
+        frame_kp = _extract_frame_keypoints(results, w, h)
 
         if frame_kp:
             sequence.append({"keypoints": frame_kp})

@@ -45,3 +45,10 @@ def get_user_videos(db: Session, user_id: int, skip: int = 0, limit: int = 100):
     获取指定用户的视频记录列表
     """
     return db.query(Video).filter(Video.user_id == user_id).offset(skip).limit(limit).all()
+
+
+def get_user_video_count(db: Session, user_id: int) -> int:
+    """
+    获取指定用户视频总数
+    """
+    return db.query(Video).filter(Video.user_id == user_id).count()

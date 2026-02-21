@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, JSON, DateTime
+from sqlalchemy import Column, Integer, String, JSON, DateTime, ForeignKey, Boolean
 from datetime import datetime
 from core.database import Base
 
@@ -25,6 +25,15 @@ class Action(Base):
     
     # 标准视频文件路径（用于对照播放）
     video_path = Column(String(500), nullable=True)
+
+    # 实时检测使用的音乐绑定（可选）
+    music_id = Column(Integer, ForeignKey("music.id"), nullable=True)
+
+    # 音乐相对标准视频的偏移（毫秒）
+    sync_offset_ms = Column(Integer, default=0, nullable=False)
+
+    # 是否已完成对齐
+    is_aligned = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
