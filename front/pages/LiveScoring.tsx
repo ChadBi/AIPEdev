@@ -105,6 +105,7 @@ const LiveScoring: React.FC = () => {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [stats, setStats] = useState<LiveStats>(DEFAULT_STATS);
+  const [displayFps, setDisplayFps] = useState(0);
   const [keypoints, setKeypoints] = useState<Keypoints | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -184,6 +185,7 @@ const LiveScoring: React.FC = () => {
       ...DEFAULT_STATS,
       music_volume: prev.music_volume,
     }));
+    setDisplayFps(0);
   }, [clearFrameLoops, stopAudio, stopWebSocket, stream]);
 
   const fetchLiveActions = useCallback(async () => {
@@ -377,9 +379,8 @@ const LiveScoring: React.FC = () => {
 
     fpsIntervalRef.current = window.setInterval(() => {
       const sent = sentFramesRef.current;
-      // 调试：记录实际发送的帧数
-      console.log('[FPS] 过去 1 秒发送了', sent, '帧');
-      setStats(prev => ({ ...prev, fps: sent }));
+      console.log('[FPS Interval] 过去 1 秒发送了', sent, '帧，更新 displayFps');
+      setDisplayFps(sent);
       sentFramesRef.current = 0;
     }, 1000);
 
@@ -513,6 +514,7 @@ const LiveScoring: React.FC = () => {
     setIsPaused(false);
     setCountdown(5);
     setStats(prev => ({ ...DEFAULT_STATS, music_volume: prev.music_volume }));
+    setDisplayFps(0);
     setKeypoints(null);
 
     // 倒计时计时器
@@ -984,7 +986,11 @@ const LiveScoring: React.FC = () => {
                 实时统计
               </h3>
               <div className="grid grid-cols-2 gap-2">
-                <StatCard label="FPS" value={String(stats.fps)} />
+                {(() => {
+                  console.log('[Render] displayFps =', displayFps, 'stats =', stats);
+                  return null;
+                })()}
+                <StatCard label="FPS" value={String(displayFps)} />
                 <StatCard label="分数" value={stats.current_score.toFixed(0)} />
                 <StatCard label="平均" value={stats.average_score.toFixed(0)} />
                 <StatCard label="处理帧数" value={String(stats.frames_processed)} />
