@@ -24,6 +24,7 @@ import {
   CheckCircle2,
   ArrowLeft,
   Music2,
+  Settings,
 } from 'lucide-react';
 
 type LiveStage = 'select' | 'detect';
@@ -720,6 +721,11 @@ const LiveScoring: React.FC = () => {
     navigate('/scores/live', { replace: true });
   };
 
+  const goToSyncAlign = () => {
+    if (!selectedActionId || !selectedMusicId) return;
+    navigate(`/sync-align?action_id=${selectedActionId}&music_id=${selectedMusicId}`);
+  };
+
   const handleStreamReady = useCallback((newStream: MediaStream | null) => {
     console.log('[handleStreamReady] 摄像头流状态变化:', {
       streamExists: !!newStream,
@@ -1071,6 +1077,14 @@ const LiveScoring: React.FC = () => {
                       {selectedSync.alignment_note}
                     </div>
                   )}
+                  <button
+                    onClick={goToSyncAlign}
+                    disabled={isPlaying}
+                    className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                  >
+                    <Settings size={14} />
+                    对齐设置
+                  </button>
                   <div className="flex items-center gap-2">
                     <span className="text-slate-400 text-xs">音量</span>
                     <input type="range" min="0" max="1" step="0.1" value={stats.music_volume} onChange={handleVolumeChange} className="flex-1 accent-indigo-500" />
