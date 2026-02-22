@@ -584,6 +584,19 @@ const LiveScoring: React.FC = () => {
               }
 
               const video = standardVideoRef.current;
+              console.log('[播放控制] 获取标准视频引用:', {
+                videoExists: !!video,
+                videoElementId: video?.id,
+                videoSrc: video?.src,
+                videoWidth: video?.videoWidth,
+                videoHeight: video?.videoHeight,
+                readyState: video?.readyState
+              });
+              if (!video) {
+                console.error('[播放控制] 错误：standardVideoRef.current 为空！无法播放视频');
+                setWarning('标准视频元素未找到，请重新加载页面');
+                return;
+              }
               video.pause();
               video.currentTime = 0;
 
