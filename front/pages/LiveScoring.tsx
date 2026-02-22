@@ -617,8 +617,19 @@ const LiveScoring: React.FC = () => {
 
                 // 延迟播放视频
                 setTimeout(() => {
+                  console.log('[播放控制] 延迟触发，检查是否播放视频:', {
+                    musicPlaying: !audioRef.current?.paused,
+                    MusicTime: audioRef.current?.currentTime,
+                    videoElementExists: !!video,
+                    videoReadyState: video?.readyState,
+                    videoPaused: video?.paused,
+                    videoSrc: video?.src
+                  });
                   if (audioRef.current && !audioRef.current.paused) {
-                    video.play().catch(() => {
+                    video.play().then(() => {
+                      console.log('[播放控制] 标准视频播放成功');
+                    }).catch((err) => {
+                      console.error('[播放控制] 标准动作视频播放失败:', err.message);
                       setWarning('标准动作视频播放失败，请重试');
                     });
                     console.log('[播放控制] 标准视频开始播放（延迟后），当前音乐时间:', audioRef.current?.currentTime);
@@ -730,6 +741,7 @@ const LiveScoring: React.FC = () => {
   }, [clearFrameLoops, isPaused, isPlaying, playAudio, startFrameLoop]);
 
   const handleStop = useCallback(() => {
+    console.log('[handleStop] 停止按钮被点击');
     stopSession(false);
   }, [stopSession]);
 
