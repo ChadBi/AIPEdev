@@ -1242,9 +1242,9 @@ const LiveScoring: React.FC = () => {
                 </div>
               )}
 
-              {/* 摄像头选择 - 只在常规模式显示 */}
-              {!isFullscreenCompare && (
-                <div className="flex flex-col h-full min-h-0">
+              {/* 摄像头选择 - 全屏模式隐藏但不卸载，避免清理代码触发 */}
+              {(!isFullscreenCompare || true) && (
+                <div className={`flex flex-col h-full min-h-0 ${isFullscreenCompare ? 'hidden' : ''}`}>
                   <CameraSelector
                     onDeviceChange={setSelectedCamera}
                     selectedDeviceId={selectedCamera}
