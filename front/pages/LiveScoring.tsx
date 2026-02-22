@@ -596,6 +596,13 @@ const LiveScoring: React.FC = () => {
                 return;
               }
 
+              // 调试日志
+              console.log('[播放控制] 同步偏移量信息:', {
+                syncOffsetMs,
+                type: typeof syncOffsetMs,
+                selectedSync: selectedSync
+              });
+
               // 根据 sync_offset_ms 决定播放顺序
               // sync_offset_ms > 0：音乐先播，视频延迟播放（视频晚于音乐）
               // sync_offset_ms < 0：视频先播，音乐延迟播放（视频早于音乐）
@@ -604,14 +611,19 @@ const LiveScoring: React.FC = () => {
               if (syncOffsetMs > 0) {
                 // 音乐立即播放，视频延迟
                 console.log('[播放控制] syncOffsetMs > 0，音乐先播，视频延迟', syncOffsetMs, 'ms');
+
+                // 立即播放音乐
                 startMusic();
 
+                // 延迟播放视频
                 setTimeout(() => {
                   if (audioRef.current && !audioRef.current.paused) {
                     video.play().catch(() => {
                       setWarning('标准动作视频播放失败，请重试');
                     });
-                    console.log('[播放控制] 标准视频开始播放（延迟后）');
+                    console.log('[播放控制] 标准视频开始播放（延迟后），当前音乐时间:', audioRef.current?.currentTime);
+                  } else {
+                    console.warn('[播放控制] 音乐未在播放，不播放视频');
                   }
                 }, syncOffsetMs);
 
@@ -630,8 +642,12 @@ const LiveScoring: React.FC = () => {
 
                   // 延迟后播放音乐
                   setTimeout(() => {
-                    startMusic(); // 直接调用 startMusic，不需要检查 paused 状态
-                    console.log('[播放控制] 音乐开始播放（延迟后）');
+                    if (videoRef.current && !videoRef.current.paused) {
+                      startMusic();
+                      console.log('[播放控制] 音乐开始播放（延迟后），当前视频时间:', videoRef.current?.currentTime);
+                    } else {
+                      console.warn('[播放控制] 视频未在播放，不播放音乐');
+                    }
                   }, musicDelayMs);
                 };
                 video.addEventListener('seeked', onSeeked);
