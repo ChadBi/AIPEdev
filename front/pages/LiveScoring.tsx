@@ -679,9 +679,8 @@ const LiveScoring: React.FC = () => {
     initAudio,
     stream,
     syncLoading,
-  ]);
-    stream,
-    syncLoading,
+    startMusic,
+    playAudio,
   ]);
 
   const handleTogglePause = useCallback(() => {
