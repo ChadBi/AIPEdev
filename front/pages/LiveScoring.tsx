@@ -584,25 +584,36 @@ const LiveScoring: React.FC = () => {
 
               const syncOffsetMs = selectedSync.sync_offset_ms || 0;
 
+              // 先开始播放音乐（音乐从 0 开始立即播放）
+              startMusic();
+
+              // 然后根据同步偏移量延迟播放视频
+              // sync_offset_ms > 0 表示视频晚播（视频要等待音乐播一定时间后才播放）
               if (syncOffsetMs > 0) {
+                console.log('[播放控制] 视频将延迟', syncOffsetMs, 'ms 后播放');
                 setTimeout(() => {
-                  video.play().catch(() => {
-                    setWarning('标准动作视频播放失败，请重试');
-                  });
+                  // 确保音乐还在播放时才开始视频
+                  if (audioRef.current && !audioRef.current.paused) {
+                    video.play().catch(() => {
+                      setWarning('标准动作视频播放失败，请重试');
+                    });
+                    console.log('[播放控制] 标准视频开始播放');
+                  }
                 }, syncOffsetMs);
               } else {
+                // 负偏移或0偏移，视频立即播放
                 const onSeeked = () => {
                   video.removeEventListener('seeked', onSeeked);
                   video.play().catch(() => {
                     setWarning('标准动作视频播放失败，请重试');
                   });
+                  console.log('[播放控制] 标准视频立即播放');
                 };
                 video.addEventListener('seeked', onSeeked);
               }
 
               connectWebSocket(selectedAction.id, syncOffsetMs);
               startFrameLoop();
-              startMusic();
             } else if (attempts < 30) {
               setTimeout(() => checkRefs(attempts + 1), 50);
               return;
