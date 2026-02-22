@@ -1363,15 +1363,17 @@ const LiveScoring: React.FC = () => {
                   )}
                 </div>
 
-                {/* 摄像头选择 - 常规模式显示，全屏模式隐藏但不卸载 */}
-                <div className="flex flex-col h-full min-h-0">
-                  <CameraSelector
-                    onDeviceChange={setSelectedCamera}
-                    selectedDeviceId={selectedCamera}
-                    onStreamReady={handleStreamReady}
-                    disabled={isPlaying}
-                  />
-                </div>
+                {/* 摄像头选择 - 全屏模式隐藏但不卸载，避免清理代码触发 */}
+                {(!isFullscreenCompare || true) && (
+                  <div className={`flex flex-col h-full min-h-0 ${isFullscreenCompare ? 'hidden' : ''}`}>
+                    <CameraSelector
+                      onDeviceChange={setSelectedCamera}
+                      selectedDeviceId={selectedCamera}
+                      onStreamReady={handleStreamReady}
+                      disabled={isPlaying}
+                    />
+                  </div>
+                )}
 
                 {/* 音乐控制与实时统计 */}
                 <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
