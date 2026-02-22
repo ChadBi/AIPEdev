@@ -1082,73 +1082,76 @@ const LiveScoring: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col">
-      <header className="bg-slate-800 border-b border-slate-700 px-6 py-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={backToSelect}
-              className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700"
-              title="返回动作选择"
-            >
-              <ArrowLeft size={18} />
-            </button>
-            <div>
-              <h1 className="text-xl font-bold text-white">实时检测 - {selectedAction.name}</h1>
-              <p className="text-sm text-slate-400">
-                {selectedSync?.is_aligned ? '已对齐' : '未对齐'}
-                {' · '}
-                {wsConnected ? '实时连接已建立' : '实时连接未建立'}
-                {' · '}
-                <span className={modelLoaded ? 'text-green-400' : 'text-amber-400'}>
-                  {modelLoaded ? '模型已就绪' : '模型加载中...'}
-                </span>
-              </p>
+    <div className={`min-h-screen bg-slate-900 flex flex-col ${isFullscreenCompare ? 'fixed inset-0 z-50' : ''}`}>
+      {/* header - 全屏模式时隐藏 */}
+      {!isFullscreenCompare && (
+        <header className="bg-slate-800 border-b border-slate-700 px-6 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={backToSelect}
+                className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700"
+                title="返回动作选择"
+              >
+                <ArrowLeft size={18} />
+              </button>
+              <div>
+                <h1 className="text-xl font-bold text-white">实时检测 - {selectedAction.name}</h1>
+                <p className="text-sm text-slate-400">
+                  {selectedSync?.is_aligned ? '已对齐' : '未对齐'}
+                  {' · '}
+                  {wsConnected ? '实时连接已建立' : '实时连接未建立'}
+                  {' · '}
+                  <span className={modelLoaded ? 'text-green-400' : 'text-amber-400'}>
+                    {modelLoaded ? '模型已就绪' : '模型加载中...'}
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate(`/sync/align?action_id=${selectedActionId}`)}
+                disabled={!selectedActionId}
+                className="flex items-center gap-2 px-4 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="进入音乐对齐页面"
+              >
+                <Music2 size={18} />
+                音乐对齐
+              </button>
+              {!isPlaying ? (
+                <button
+                  onClick={handleStart}
+                  disabled={!canStart}
+                  className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Play size={18} />
+                  开始检测
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={handleTogglePause}
+                    className="flex items-center gap-2 px-6 py-3 bg-amber-600 text-white font-semibold rounded-xl hover:bg-amber-700"
+                  >
+                    {isPaused ? <Play size={18} /> : <Pause size={18} />}
+                    {isPaused ? '继续' : '暂停'}
+                  </button>
+                  <button
+                    onClick={handleStop}
+                    className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white font-semibold rounded-xl hover:bg-red-700"
+                  >
+                    <Square size={18} />
+                    停止
+                  </button>
+                </>
+              )}
             </div>
           </div>
+        </header>
+      )}
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate(`/sync/align?action_id=${selectedActionId}`)}
-              disabled={!selectedActionId}
-              className="flex items-center gap-2 px-4 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              title="进入音乐对齐页面"
-            >
-              <Music2 size={18} />
-              音乐对齐
-            </button>
-            {!isPlaying ? (
-              <button
-                onClick={handleStart}
-                disabled={!canStart}
-                className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Play size={18} />
-                开始检测
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={handleTogglePause}
-                  className="flex items-center gap-2 px-6 py-3 bg-amber-600 text-white font-semibold rounded-xl hover:bg-amber-700"
-                >
-                  {isPaused ? <Play size={18} /> : <Pause size={18} />}
-                  {isPaused ? '继续' : '暂停'}
-                </button>
-                <button
-                  onClick={handleStop}
-                  className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white font-semibold rounded-xl hover:bg-red-700"
-                >
-                  <Square size={18} />
-                  停止
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <div className="flex-1 p-6 overflow-hidden relative">
+      <div className={`flex-1 ${isFullscreenCompare ? 'flex flex-col overflow-hidden' : 'p-6'}`}>
         {/* 倒计时覆盖层 */}
         {countdown !== null && (
           <div className="absolute inset-0 flex items-center justify-center z-50 bg-slate-900/80 backdrop-blur-sm">
@@ -1159,56 +1162,175 @@ const LiveScoring: React.FC = () => {
           </div>
         )}
 
-        {/* 主内容区域 - 通过 isFullscreenCompare 控制布局，不条件渲染 LiveVideoPanel */}
-        <div className={`h-full ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
-          {/* 主视频区域 - 两种布局使用相同结构，通过 CSS 控制显示 */}
-          <div className={`${
-            isFullscreenCompare
-              ? 'flex h-full gap-4 pr-4' // 全屏模式：横向布局
-              : 'grid grid-rows-2 gap-4'  // 常规模式：纵向布局，两行
-          }`}>
-            {/* 第一行/左侧：两个视频面板 - 使用固定 key 避免重新挂载 */}
-            <div className={`${
-              isFullscreenCompare
-                ? 'flex-1 grid grid-cols-2 gap-4' // 全屏：并列
-                : 'grid grid-cols-2 gap-4'         // 常规：第一行并列
-            }`}>
-              {/* 标准动作视频 - 使用固定 key */}
-              <LiveVideoPanel
-                key="standard-video-panel"
-                videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
-                videoRef={standardVideoRef}
-                title="标准动作"
-                isActive={isPlaying && !isPaused}
-                showSkeleton={false}
-                className="h-full"
-                muted
-                loop
-              />
+        {/* 全屏模式布局 */}
+        {isFullscreenCompare ? (
+          <div className={`h-full flex flex-col ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
+            {/* 全屏顶部控制栏 */}
+            <div className="bg-slate-800/95 backdrop-blur-sm border-b border-slate-700 px-4 py-2 flex items-center justify-between shrink-0">
+              {/* 左侧：当前分数和统计 */}
+              <div className="flex items-center gap-4">
+                <div className="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg px-4 py-2 text-center">
+                  <div className="text-3xl font-bold text-white">{stats.current_score.toFixed(0)}</div>
+                  <div className="text-white/80 text-xs">当前分数</div>
+                </div>
+                <div className="flex gap-2">
+                  <div className="bg-slate-700/50 rounded px-3 py-1">
+                    <span className="text-slate-400 text-xs">FPS</span>
+                    <span className="text-white font-bold ml-1">{displayFps}</span>
+                  </div>
+                  <div className="bg-slate-700/50 rounded px-3 py-1">
+                    <span className="text-slate-400 text-xs">平均</span>
+                    <span className="text-white font-bold ml-1">{stats.average_score.toFixed(0)}</span>
+                  </div>
+                  <div className="bg-slate-700/50 rounded px-3 py-1">
+                    <span className="text-slate-400 text-xs">延迟</span>
+                    <span className="text-white font-bold ml-1">{Math.round(stats.latency_ms)}ms</span>
+                  </div>
+                </div>
+              </div>
 
-              {/* 实时画面 - 使用固定 key（与全屏模式相同，避免重新挂载） */}
-              <LiveVideoPanel
-                key="live-video-panel"
-                stream={stream}
-                videoRef={liveVideoRef}
-                title="实时画面"
-                isActive={cameraReady}
-                score={stats.current_score > 0 ? stats.current_score : undefined}
-                keypoints={keypoints}
-                showSkeleton
-                className="h-full"
-                muted
-              />
+              {/* 中间：状态指示 */}
+              <div className="flex items-center gap-2 text-sm">
+                {wsConnected ? (
+                  <span className="text-green-400">● 已连接</span>
+                ) : (
+                  <span className="text-red-400">● 未连接</span>
+                )}
+                <span className="text-slate-400">{selectedAction.name}</span>
+              </div>
+
+              {/* 右侧：控制按钮 */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowStatsPanel(!showStatsPanel)}
+                  className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700"
+                  title={showStatsPanel ? '隐藏详细信息' : '显示详细信息'}
+                >
+                  <Zap size={20} />
+                </button>
+                <button
+                  onClick={handleTogglePause}
+                  className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white font-semibold rounded-lg hover:bg-amber-700"
+                >
+                  {isPaused ? <Play size={18} /> : <Pause size={18} />}
+                  {isPaused ? '继续' : '暂停'}
+                </button>
+                <button
+                  onClick={handleStop}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700"
+                >
+                  <Square size={18} />
+                  停止
+                </button>
+              </div>
             </div>
 
-            {/* 第二行/右侧：控制面板 */}
-            <div className={`${
-              isFullscreenCompare
-                ? `flex flex-col ${showStatsPanel ? 'w-80' : 'hidden'}` // 全屏：右侧统计面板
-                : 'grid grid-cols-3 gap-4'                               // 常规：第二行三列控制面板
-            }`}>
-              {/* 音乐选择 - 只在常规模式显示 */}
-              {!isFullscreenCompare && (
+            {/* 详细统计面板 - 可折叠 */}
+            {showStatsPanel && (
+              <div className="bg-slate-800/80 backdrop-blur-sm border-b border-slate-700 px-4 py-2 flex items-center justify-around shrink-0">
+                <div className="text-center">
+                  <div className="text-slate-400 text-xs">处理帧数</div>
+                  <div className="text-white font-bold">{stats.frames_processed}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-slate-400 text-xs">音乐状态</div>
+                  <div className="text-white font-bold">{stats.music_playing ? '播放中' : '未播放'}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-slate-400 text-xs">音乐名称</div>
+                  <div className="text-white font-bold text-sm truncate max-w-[200px]">{selectedMusic?.music_name || '-'}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-slate-400 text-xs">音量</div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={stats.music_volume}
+                    onChange={handleVolumeChange}
+                    className="w-24 accent-indigo-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* 全屏视频区域 - 两个视频各占一半 */}
+            <div className="flex-1 grid grid-cols-2 gap-0">
+              {/* 标准动作视频 */}
+              <div className="relative border-r border-slate-700">
+                <LiveVideoPanel
+                  key="standard-video-panel"
+                  videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
+                  videoRef={standardVideoRef}
+                  title="标准动作"
+                  isActive={isPlaying && !isPaused}
+                  showSkeleton={false}
+                  className="h-full"
+                  muted
+                  loop
+                />
+              </div>
+
+              {/* 实时画面 */}
+              <div className="relative">
+                <LiveVideoPanel
+                  key="live-video-panel"
+                  stream={stream}
+                  videoRef={liveVideoRef}
+                  title="实时画面"
+                  isActive={cameraReady}
+                  score={stats.current_score > 0 ? stats.current_score : undefined}
+                  keypoints={keypoints}
+                  showSkeleton
+                  className="h-full"
+                  muted
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* 常规布局 */
+          <div className={`h-full ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
+            {/* 主内容区域 - 常规布局 */}
+            <div className="h-full grid grid-rows-2 gap-4">
+              {/* 第一行：两个视频面板并排 */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* 标准动作视频（静音） */}
+                <div className="flex flex-col h-full">
+                  <LiveVideoPanel
+                    key="standard-video-panel"
+                    videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
+                    videoRef={standardVideoRef}
+                    title="标准动作"
+                    isActive={isPlaying && !isPaused}
+                    showSkeleton={false}
+                    className="h-full"
+                    muted
+                    loop
+                  />
+                </div>
+
+                {/* 实时画面 */}
+                <div className="flex flex-col h-full">
+                  <LiveVideoPanel
+                    key="live-video-panel"
+                    stream={stream}
+                    videoRef={liveVideoRef}
+                    title="实时画面"
+                    isActive={cameraReady}
+                    score={stats.current_score > 0 ? stats.current_score : undefined}
+                    keypoints={keypoints}
+                    showSkeleton
+                    className="h-full"
+                    muted
+                  />
+                </div>
+              </div>
+
+              {/* 第二行：三个控制面板并排 */}
+              <div className="grid grid-cols-3 gap-4">
+                {/* 音乐选择 */}
                 <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
                   <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
                     <Music2 size={18} className="text-indigo-400" />
@@ -1240,11 +1362,9 @@ const LiveScoring: React.FC = () => {
                     </div>
                   )}
                 </div>
-              )}
 
-              {/* 摄像头选择 - 全屏模式隐藏但不卸载，避免清理代码触发 */}
-              {(!isFullscreenCompare || true) && (
-                <div className={`flex flex-col h-full min-h-0 ${isFullscreenCompare ? 'hidden' : ''}`}>
+                {/* 摄像头选择 - 常规模式显示，全屏模式隐藏但不卸载 */}
+                <div className="flex flex-col h-full min-h-0">
                   <CameraSelector
                     onDeviceChange={setSelectedCamera}
                     selectedDeviceId={selectedCamera}
@@ -1252,61 +1372,8 @@ const LiveScoring: React.FC = () => {
                     disabled={isPlaying}
                   />
                 </div>
-              )}
 
-              {/* 全屏模式统计面板 */}
-              {isFullscreenCompare && showStatsPanel && (
-                <div className="bg-slate-800/95 backdrop-blur-sm rounded-2xl p-4 flex flex-col h-full">
-                  {/* 面板头部 */}
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-white font-semibold flex items-center gap-2">
-                      <Zap size={18} className="text-yellow-500" />
-                      实时统计
-                    </h3>
-                    <button
-                      onClick={() => setShowStatsPanel(false)}
-                      className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-700"
-                      title="隐藏面板"
-                    >
-                      <Square size={18} />
-                    </button>
-                  </div>
-
-                  {/* 当前分数大显示 */}
-                  <div className="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl p-6 mb-4 text-center">
-                    <div className="text-5xl font-bold text-white">{stats.current_score.toFixed(0)}</div>
-                    <div className="text-white/80 text-sm mt-1">当前分数</div>
-                  </div>
-
-                  {/* 详细统计数据 */}
-                  <div className="flex-1 space-y-2 overflow-auto">
-                    <StatCard label="FPS" value={String(displayFps)} />
-                    <StatCard label="平均" value={stats.average_score.toFixed(0)} />
-                    <StatCard label="处理帧数" value={String(stats.frames_processed)} />
-                    <StatCard label="网络延迟" value={`${Math.round(stats.latency_ms)}ms`} />
-                    <StatCard label="音乐状态" value={stats.music_playing ? '播放中' : '未播放'} />
-                  </div>
-
-                  {/* 音量控制 */}
-                  <div className="mt-4 pt-4 border-t border-slate-700">
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-400 text-xs">音量</span>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.1"
-                        value={stats.music_volume}
-                        onChange={handleVolumeChange}
-                        className="flex-1 accent-indigo-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* 常规模式音乐控制与实时统计 */}
-              {!isFullscreenCompare && (
+                {/* 音乐控制与实时统计 */}
                 <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
                   <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
                     <Music2 size={18} className="text-indigo-400" />
@@ -1352,34 +1419,24 @@ const LiveScoring: React.FC = () => {
                     <StatCard label="模型状态" value={modelLoaded ? '就绪' : '加载中'} />
                   </div>
                 </div>
-              )}
+              </div>
             </div>
           </div>
+        )}
 
-          {/* 浮动按钮：显示统计面板 - 只在全屏模式隐藏面板时显示 */}
-          {isFullscreenCompare && !showStatsPanel && (
-            <button
-              onClick={() => setShowStatsPanel(true)}
-              className="fixed bottom-6 right-6 bg-slate-800/90 backdrop-blur-sm text-white p-3 rounded-full shadow-lg hover:bg-slate-700 transition-all z-40"
-              title="显示统计面板"
-            >
-              <Zap size={24} />
-            </button>
-          )}
-        </div>
-
-      {(error || warning) && (
-        <div className="px-6 pb-4">
-          {error && (
-            <div className="mb-2 p-3 bg-red-500/20 text-red-300 rounded-xl text-sm">{error}</div>
-          )}
-          {warning && (
-            <div className="p-3 bg-amber-500/20 text-amber-300 rounded-xl text-sm">{warning}</div>
-          )}
-        </div>
-      )}
-      </div>  // Close flex-1 content div
-    </div>      // Close main container
+        {/* 错误和警告信息 */}
+        {(error || warning) && !isFullscreenCompare && (
+          <div className="mt-4">
+            {error && (
+              <div className="mb-2 p-3 bg-red-500/20 text-red-300 rounded-xl text-sm">{error}</div>
+            )}
+            {warning && (
+              <div className="p-3 bg-amber-500/20 text-amber-300 rounded-xl text-sm">{warning}</div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 
