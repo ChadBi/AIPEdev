@@ -882,15 +882,52 @@ const LiveScoring: React.FC = () => {
           {/* 全屏顶部控制栏 */}
           <div className="bg-slate-800/95 backdrop-blur-sm border-b border-slate-700 px-4 py-2 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-4">
+              {/* 当前分数 */}
               <div className="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg px-4 py-2 text-center">
                 <div className="text-3xl font-bold text-white">{stats.current_score.toFixed(0)}</div>
                 <div className="text-white/80 text-xs">当前分数</div>
               </div>
               <div className="flex gap-2">
+                {/* FPS */}
                 <div className="bg-slate-700/50 rounded px-3 py-1">
                   <span className="text-slate-400 text-xs">FPS</span>
                   <span className="text-white font-bold ml-1">{displayFps}</span>
                 </div>
+                {/* 平均分 */}
+                <div className="bg-slate-700/50 rounded px-3 py-1">
+                  <span className="text-slate-400 text-xs">平均分</span>
+                  <span className="text-white font-bold ml-1">{stats.average_score.toFixed(1)}</span>
+                </div>
+                {/* 帧数 */}
+                <div className="bg-slate-700/50 rounded px-3 py-1">
+                  <span className="text-slate-400 text-xs">帧数</span>
+                  <span className="text-white font-bold ml-1">{stats.frames_processed}</span>
+                </div>
+                {/* 延迟 */}
+                <div className="bg-slate-700/50 rounded px-3 py-1">
+                  <span className="text-slate-400 text-xs">延迟</span>
+                  <span className="text-white font-bold ml-1">{stats.latency_ms}ms</span>
+                </div>
+                {/* 音乐状态 */}
+                <div className="bg-slate-700/50 rounded px-3 py-1 flex items-center gap-1">
+                  <Music2 size={14} className={stats.music_playing ? 'text-green-400' : 'text-slate-400'} />
+                  <span className={`text-xs font-medium ${stats.music_playing ? 'text-green-400' : 'text-slate-400'}`}>
+                    {stats.music_playing ? '播放中' : '未播放'}
+                  </span>
+                </div>
+              </div>
+              {/* 音量控制 */}
+              <div className="flex items-center gap-2 bg-slate-700/50 rounded px-3 py-1">
+                <span className="text-slate-400 text-xs">音量</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={stats.music_volume}
+                  onChange={handleVolumeChange}
+                  className="w-20 accent-indigo-500"
+                />
               </div>
             </div>
             <div className="flex items-center gap-2">
