@@ -150,6 +150,9 @@ const LiveScoring: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const initialMusicAppliedRef = useRef(false);
 
+  // 保存流，避免组件重新挂载时丢失
+  const persistedStreamRef = useRef<MediaStream | null>(null);
+
   const clearFrameLoops = useCallback(() => {
     if (frameIntervalRef.current) {
       window.clearInterval(frameIntervalRef.current);
@@ -630,25 +633,49 @@ const LiveScoring: React.FC = () => {
 
                 // 延迟播放视频
                 setTimeout(() => {
-                  console.log('[播放控制] 延迟触发，检查是否播放视频:', {
-                    musicPlaying: !audioRef.current?.paused,
-                    MusicTime: audioRef.current?.currentTime,
-                    videoElementExists: !!video,
-                    videoReadyState: video?.readyState,
-                    videoPaused: video?.paused,
-                    videoSrc: video?.src
-                  });
-                  if (audioRef.current && !audioRef.current.paused) {
-                    video.play().then(() => {
-                      console.log('[播放控制] 标准视频播放成功');
+                  // 使用 current 而不是捕获的 video 变量，确保引用的是当前 DOM 中的视频元素
+                  const playStandardVideo = (retryCount = 0) => {
+                    const currentVideo = standardVideoRef.current;
+                    if (!currentVideo) {
+                      console.error('[播放控制] 延迟触发时无法获取标准视频引用');
+                      return;
+                    }
+
+                    console.log('[播放控制] 延迟触发，检查标准视频状态:', {
+                      elapsedMs: syncOffsetMs,
+                      currentTime: currentVideo.currentTime,
+                      paused: currentVideo.paused,
+                      readyState: currentVideo.readyState,
+                      readyStateStr: ['HAVE_NOTHING', 'HAVE_METADATA', 'HAVE_CURRENT_DATA', 'HAVE_FUTURE_DATA', 'HAVE_ENOUGH_DATA'][currentVideo.readyState] || 'UNKNOWN',
+                      videoWidth: currentVideo.videoWidth,
+                      videoHeight: currentVideo.videoHeight,
+                      videoExists: !!currentVideo.src,
+                      retryCount
+                    });
+
+                    // 重试直到视频尺寸加载完成
+                    if (currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
+                      if (retryCount < 50) {
+                        console.log('[播放控制] 视频尺寸未加载完成，100ms 后重试...');
+                        setTimeout(() => playStandardVideo(retryCount + 1), 100);
+                        return;
+                      } else {
+                        console.error('[播放控制] 视频尺寸加载超时，强制播放');
+                      }
+                    }
+
+                    // 直接播放视频（不设置 currentTime）
+                    currentVideo.play().then(() => {
+                      console.log('[播放控制] 标准视频播放成功，当前时间:', currentVideo.currentTime);
                     }).catch((err) => {
-                      console.error('[播放控制] 标准动作视频播放失败:', err.message);
+                      console.error('[播放控制] 标准动作视频播放失败:', {
+                        name: err.name,
+                        message: err.message
+                      });
                       setWarning('标准动作视频播放失败，请重试');
                     });
-                    console.log('[播放控制] 标准视频开始播放（延迟后），当前音乐时间:', audioRef.current?.currentTime);
-                  } else {
-                    console.warn('[播放控制] 音乐未在播放，不播放视频');
-                  }
+                  };
+                  playStandardVideo();
                 }, syncOffsetMs);
 
               } else if (syncOffsetMs < 0) {
@@ -656,39 +683,90 @@ const LiveScoring: React.FC = () => {
                 const musicDelayMs = Math.abs(syncOffsetMs);
                 console.log('[播放控制] syncOffsetMs < 0，视频先播，音乐延迟', musicDelayMs, 'ms');
 
-                // 先播放视频
-                const onSeeked = () => {
-                  video.removeEventListener('seeked', onSeeked);
-                  video.play().catch(() => {
+                // 等待视频加载完成后播放
+                const playStandardVideo = (retryCount = 0) => {
+                  const currentVideo = standardVideoRef.current;
+                  if (!currentVideo) {
+                    console.error('[播放控制] 无法获取标准视频引用');
+                    return;
+                  }
+
+                  if (currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
+                    if (retryCount < 50) {
+                      setTimeout(() => playStandardVideo(retryCount + 1), 100);
+                      return;
+                    }
+                  }
+
+                  currentVideo.currentTime = 0;
+                  currentVideo.play().catch(() => {
                     setWarning('标准动作视频播放失败，请重试');
                   });
                   console.log('[播放控制] 标准视频立即播放');
 
                   // 延迟后播放音乐
                   setTimeout(() => {
-                    if (videoRef.current && !videoRef.current.paused) {
-                      startMusic();
-                      console.log('[播放控制] 音乐开始播放（延迟后），当前视频时间:', videoRef.current?.currentTime);
-                    } else {
-                      console.warn('[播放控制] 视频未在播放，不播放音乐');
-                    }
+                    startMusic();
+                    console.log('[播放控制] 音乐开始播放（延迟后）');
                   }, musicDelayMs);
                 };
-                video.addEventListener('seeked', onSeeked);
+
+                const video = standardVideoRef.current;
+                if (video) {
+                  // 添加事件监听器确保视频加载完成
+                  const onLoaded = () => {
+                    video.removeEventListener('loadedmetadata', onLoaded);
+                    video.removeEventListener('canplay', onLoaded);
+                    playStandardVideo();
+                  };
+                  video.addEventListener('loadedmetadata', onLoaded);
+                  video.addEventListener('canplay', onLoaded);
+                  // 如果视频已经加载，直接播放
+                  if (video.videoWidth > 0) {
+                    playStandardVideo();
+                  }
+                }
 
               } else {
                 // 偏移量为0，同时播放
                 console.log('[播放控制] syncOffsetMs == 0，同时开始播放');
                 startMusic();
 
-                const onSeeked = () => {
-                  video.removeEventListener('seeked', onSeeked);
-                  video.play().catch(() => {
+                // 等待视频加载完成后播放
+                const playStandardVideo = (retryCount = 0) => {
+                  const currentVideo = standardVideoRef.current;
+                  if (!currentVideo) {
+                    console.error('[播放控制] 无法获取标准视频引用');
+                    return;
+                  }
+
+                  if (currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
+                    if (retryCount < 50) {
+                      setTimeout(() => playStandardVideo(retryCount + 1), 100);
+                      return;
+                    }
+                  }
+
+                  currentVideo.currentTime = 0;
+                  currentVideo.play().catch(() => {
                     setWarning('标准动作视频播放失败，请重试');
                   });
                   console.log('[播放控制] 标准视频开始播放（同步）');
                 };
-                video.addEventListener('seeked', onSeeked);
+
+                const video = standardVideoRef.current;
+                if (video) {
+                  const onLoaded = () => {
+                    video.removeEventListener('loadedmetadata', onLoaded);
+                    video.removeEventListener('canplay', onLoaded);
+                    playStandardVideo();
+                  };
+                  video.addEventListener('loadedmetadata', onLoaded);
+                  video.addEventListener('canplay', onLoaded);
+                  if (video.videoWidth > 0) {
+                    playStandardVideo();
+                  }
+                }
               }
 
               connectWebSocket(selectedAction.id, syncOffsetMs);
@@ -825,6 +903,7 @@ const LiveScoring: React.FC = () => {
       isPlaying,
       isFullscreenCompare,
       currentStream: !!stream,
+      persistedStream: !!persistedStreamRef.current,
       ignoreNullStreamUpdate: ignoreNullStreamUpdateRef.current
     });
 
@@ -833,6 +912,10 @@ const LiveScoring: React.FC = () => {
         console.log('[handleStreamReady] 检测进行中，忽略布局切换导致的流状态变化');
         return;
       }
+    }
+
+    if (newStream) {
+      persistedStreamRef.current = newStream;
     }
 
     setStream(newStream);
@@ -977,9 +1060,10 @@ const LiveScoring: React.FC = () => {
 
         {/* 始终渲染两个 LiveVideoPanel - 防止重新挂载 */}
         {/* 全屏模式布局 */}
-        <div className={`h-full flex flex-col ${countdown !== null ? 'opacity-30 pointer-events-none' : ''} ${isFullscreenCompare ? '' : 'hidden'}`}>
-          {/* 全屏顶部控制栏 */}
-          <div className="bg-slate-800/95 backdrop-blur-sm border-b border-slate-700 px-4 py-2 flex items-center justify-between shrink-0">
+        {isFullscreenCompare && (
+          <div className={`h-full flex flex-col ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
+            {/* 全屏顶部控制栏 */}
+            <div className="bg-slate-800/95 backdrop-blur-sm border-b border-slate-700 px-4 py-2 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-4">
               {/* 当前分数 */}
               <div className="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg px-4 py-2 text-center">
@@ -1038,11 +1122,21 @@ const LiveScoring: React.FC = () => {
                 <Square size={18} /> 停止
               </button>
             </div>
+            {/* 隐藏的 CameraSelector，用于在全屏模式保持流 */}
+            <div className="hidden">
+              <CameraSelector
+                onDeviceChange={setSelectedCamera}
+                selectedDeviceId={selectedCamera}
+                onStreamReady={handleStreamReady}
+                disabled={isPlaying}
+                preserveStreamOnUnmount={true}
+              />
+            </div>
           </div>
           <div className="flex-1 grid grid-cols-2 gap-0">
             <div className="relative border-r border-slate-700">
               <LiveVideoPanel
-                key="standard-video-panel-fullscreen"
+                key="standard-video-panel"
                 videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
                 videoRef={standardVideoRef}
                 title="标准动作"
@@ -1055,8 +1149,8 @@ const LiveScoring: React.FC = () => {
             </div>
             <div className="relative">
               <LiveVideoPanel
-                key="live-video-panel-fullscreen"
-                stream={stream}
+                key="live-video-panel"
+                stream={stream || persistedStreamRef.current || undefined}
                 videoRef={liveVideoRef}
                 title="实时画面"
                 isActive={cameraReady}
@@ -1069,13 +1163,14 @@ const LiveScoring: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
 
-        {/* 常规布局 */}
-        <div className={`h-full grid grid-rows-2 gap-4 ${countdown !== null ? 'opacity-30 pointer-events-none' : ''} ${isFullscreenCompare ? 'hidden' : ''}`}>
-          <div className="grid grid-cols-2 gap-4">
+        {!isFullscreenCompare && (
+          <div className={`h-full grid grid-rows-2 gap-4 ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
+            <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col h-full">
               <LiveVideoPanel
-                key="standard-video-panel-regular"
+                key="standard-video-panel"
                 videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
                 videoRef={standardVideoRef}
                 title="标准动作"
@@ -1088,8 +1183,8 @@ const LiveScoring: React.FC = () => {
             </div>
             <div className="flex flex-col h-full">
               <LiveVideoPanel
-                key="live-video-panel-regular"
-                stream={stream}
+                key="live-video-panel"
+                stream={stream || persistedStreamRef.current || undefined}
                 videoRef={liveVideoRef}
                 title="实时画面"
                 isActive={cameraReady}
@@ -1189,6 +1284,7 @@ const LiveScoring: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
 
         {(error || warning) && !isFullscreenCompare && (
           <div className="mt-4">
