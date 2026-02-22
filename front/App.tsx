@@ -117,6 +117,7 @@ const AppContent: React.FC = () => {
             <Route path="/scores/history" element={<ScoreHistory />} />
             <Route path="/scores/live" element={<LiveScoring />} />
             <Route path="/music" element={<MusicLibrary />} />
+            <Route path="/sync-align" element={<SyncAlign />} />
             <Route path="/sync/align" element={<SyncAlign />} />
             <Route path="/profile" element={<UserProfile />} />
             <Route path="/users/me" element={<UserProfile />} />
