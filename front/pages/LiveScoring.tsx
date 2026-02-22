@@ -499,8 +499,8 @@ const LiveScoring: React.FC = () => {
       .catch(() => setWarning('音乐播放失败，请检查浏览器媒体权限'));
   }, []);
 
-  const startMusic = useCallback(() => {
-    if (!selectedMusic) return;
+  const initAudio = useCallback(() => {
+    if (!selectedMusic) return false;
 
     if (audioRef.current) {
       audioRef.current.pause();
@@ -513,8 +513,13 @@ const LiveScoring: React.FC = () => {
     audio.preload = 'auto';
     audio.currentTime = 0;
     audioRef.current = audio;
+    return true;
+  }, [selectedMusic, stats.music_volume]);
+
+  const startMusic = useCallback(() => {
+    if (!audioRef.current) return;
     playAudio();
-  }, [playAudio, selectedMusic, stats.music_volume]);
+  }, [playAudio]);
 
   const handleStart = useCallback(() => {
     if (!selectedAction || !selectedAction.video_path || !selectedMusicId || !selectedMusic || !cameraReady || !stream || syncLoading || !selectedSync) {
@@ -584,6 +589,13 @@ const LiveScoring: React.FC = () => {
 
               const syncOffsetMs = selectedSync.sync_offset_ms || 0;
 
+              // 先初始化音频（加载但不播放）
+              const audioInitialized = initAudio();
+              if (!audioInitialized) {
+                setWarning('初始化音频失败');
+                return;
+              }
+
               // 根据 sync_offset_ms 决定播放顺序
               // sync_offset_ms > 0：音乐先播，视频延迟播放（视频晚于音乐）
               // sync_offset_ms < 0：视频先播，音乐延迟播放（视频早于音乐）
@@ -618,10 +630,8 @@ const LiveScoring: React.FC = () => {
 
                   // 延迟后播放音乐
                   setTimeout(() => {
-                    if (videoRef.current && !videoRef.current.paused && !audioRef.current?.paused) {
-                      startMusic();
-                      console.log('[播放控制] 音乐开始播放（延迟后）');
-                    }
+                    startMusic(); // 直接调用 startMusic，不需要检查 paused 状态
+                    console.log('[播放控制] 音乐开始播放（延迟后）');
                   }, musicDelayMs);
                 };
                 video.addEventListener('seeked', onSeeked);
@@ -666,7 +676,10 @@ const LiveScoring: React.FC = () => {
     selectedMusicId,
     selectedSync,
     startFrameLoop,
-    startMusic,
+    initAudio,
+    stream,
+    syncLoading,
+  ]);
     stream,
     syncLoading,
   ]);
