@@ -59,12 +59,17 @@ function getErrorMessage(error: any, fallback: string): string {
 
 function buildWsBaseUrl(): string {
   const configuredBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
+
+  // 如果配置了 API_BASE_URL（生产环境）
   if (configuredBase) {
     if (configuredBase.startsWith('https://')) return configuredBase.replace('https://', 'wss://');
     if (configuredBase.startsWith('http://')) return configuredBase.replace('http://', 'ws://');
+    return configuredBase;
   }
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${window.location.host}`;
+
+  // 开发环境：使用 Vite 的 WebSocket 代理
+  // 返回空字符串，将使用相对路径 '/ws'，由 Vite 代理到 'ws://localhost:8000'
+  return '';
 }
 
 const LiveScoring: React.FC = () => {
@@ -100,12 +105,39 @@ const LiveScoring: React.FC = () => {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
 
+  // 跟踪 stream 变化
+  useEffect(() => {
+    console.log('[LiveScoring] stream 状态变化:', {
+      exists: !!stream,
+      trackCount: stream ? stream.getTracks().length : 0,
+      trackDetails: stream ? stream.getTracks().map(t => ({
+        kind: t.kind,
+        id: t.id.slice(0, 12),
+        enabled: t.enabled
+      })) : 'N/A'
+    });
+  }, [stream]);
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isFullscreenCompare, setIsFullscreenCompare] = useState(false);
   const [showStatsPanel, setShowStatsPanel] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
+
+  // Refs for state values used in stopSession (avoid dependency changes)
+  const isPlayingRef = useRef(false);
+  const isFullscreenCompareRef = useRef(false);
+  const ignoreNullStreamUpdateRef = useRef(false); // 标记是否应该忽略空流更新
+
+  // Sync state to refs
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  useEffect(() => {
+    isFullscreenCompareRef.current = isFullscreenCompare;
+  }, [isFullscreenCompare]);
   const [stats, setStats] = useState<LiveStats>(DEFAULT_STATS);
   const [displayFps, setDisplayFps] = useState(0);
   const [keypoints, setKeypoints] = useState<Keypoints | null>(null);
@@ -164,7 +196,22 @@ const LiveScoring: React.FC = () => {
     setWsConnected(false);
   }, []);
 
-  const stopSession = useCallback((stopCamera: boolean) => {
+  const stopSession = useCallback((stopCamera: boolean, reason: string = 'unknown') => {
+    console.log('[stopSession] 调用，参数:', stopCamera, '原因:', reason);
+    const currentIsPlaying = isPlayingRef.current;
+    const currentIsFullscreen = isFullscreenCompareRef.current;
+    console.log('[stopSession] 调用时状态 (从 ref):', {
+      isPlaying: currentIsPlaying,
+      isFullscreenCompare: currentIsFullscreen,
+      isPaused: isPaused
+    });
+
+    // 如果是因为组件重新挂载导致的 cleanup（React Strict Mode 双重调用），不执行完全重置
+    if (reason === 'cleanup' && currentIsFullscreen && currentIsPlaying) {
+      console.log('[stopSession] 检测进行中，忽略组件重新挂载导致的 cleanup');
+      return;
+    }
+
     clearFrameLoops();
     stopWebSocket();
     stopAudio();
@@ -184,13 +231,19 @@ const LiveScoring: React.FC = () => {
     setIsPlaying(false);
     setIsPaused(false);
     setIsFullscreenCompare(false);
+    // 只在真实停止检测时重置保护标记，而不是组件卸载时
+    if (reason !== 'cleanup') {
+      ignoreNullStreamUpdateRef.current = false; // 重置空流更新忽略标记
+    } else {
+      console.log('[stopSession] 组件卸载 cleanup，保持保护标记不重置');
+    }
     setShowStatsPanel(true);
     setStats(prev => ({
       ...DEFAULT_STATS,
       music_volume: prev.music_volume,
     }));
     setDisplayFps(0);
-  }, [clearFrameLoops, stopAudio, stopWebSocket, stream]);
+  }, [clearFrameLoops, stopAudio, stopWebSocket, stream, isPaused]);
 
   const fetchLiveActions = useCallback(async () => {
     setLoading(true);
@@ -242,6 +295,13 @@ const LiveScoring: React.FC = () => {
       setLoading(false);
     }
   }, [initialActionId, initialVideoId]);
+
+  // 监控全屏比对模式状态变化 - 调试用
+  useEffect(() => {
+    console.log('[全屏状态] isFullscreenCompare 变化:', isFullscreenCompare);
+    console.log('[全屏状态] isPlaying:', isPlaying);
+    console.log('[全屏状态] countdown:', countdown);
+  }, [isFullscreenCompare, isPlaying, countdown]);
 
   useEffect(() => {
     fetchLiveActions();
@@ -332,10 +392,34 @@ const LiveScoring: React.FC = () => {
 
   const connectWebSocket = useCallback((actionId: number, syncOffsetMs: number) => {
     stopWebSocket();
-    const ws = new WebSocket(`${buildWsBaseUrl()}/ws/live/action/${actionId}?sync_offset_ms=${syncOffsetMs}`);
+
+    const wsBaseUrl = buildWsBaseUrl();
+    const wsUrl = `${wsBaseUrl}/ws/live/action/${actionId}?sync_offset_ms=${syncOffsetMs}`;
+
+    console.log('[WebSocket] 正在建立连接:', wsUrl);
+    console.log('[WebSocket] 当前页面URL:', window.location.href);
+    console.log('[WebSocket] WebSocket URL详细信息:', {
+      baseUrl: wsBaseUrl,
+      fullUrl: wsUrl,
+      actionId,
+      syncOffsetMs
+    });
+
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
+    // 设置连接超时，防止挂起
+    const connectionTimeout = setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        console.error('[WebSocket] 连接超时');
+        ws.close();
+        setWarning('WebSocket连接超时，请检查网络或后端服务');
+      }
+    }, 10000); // 10秒超时
+
     ws.onopen = () => {
+      clearTimeout(connectionTimeout);
+      console.log('[WebSocket] 连接成功建立');
       setWsConnected(true);
       setWarning('');
     };
@@ -343,6 +427,8 @@ const LiveScoring: React.FC = () => {
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
+        console.log('[WebSocket] 收到消息:', message.type);
+
         if (message.type === 'score') {
           const payload = message.data as LiveWsScorePayload & { keypoints?: Keypoints; standard_keypoints?: Keypoints };
           setStats(prev => ({
@@ -357,29 +443,65 @@ const LiveScoring: React.FC = () => {
             setKeypoints(payload.keypoints);
           }
         } else if (message.type === 'error') {
+          console.error('[WebSocket] 收到错误消息:', message);
           setWarning(message.data?.message || '实时检测出现错误');
         }
-      } catch {
+      } catch (err) {
+        console.error('[WebSocket] 解析消息失败:', err);
         setWarning('收到无法解析的实时消息');
       }
     };
 
-    ws.onerror = () => {
+    ws.onerror = (error) => {
+      clearTimeout(connectionTimeout);
+      console.error('[WebSocket] 发生错误:', error);
+      console.error('[WebSocket] 当前readyState:', ws.readyState);
+      console.error('[WebSocket] URL:', wsUrl);
+      console.error('[WebSocket] 错误详情:', {
+        type: error.type,
+        target: error.target ? {
+          url: error.target.url,
+          readyState: error.target.readyState
+        } : 'N/A'
+      });
       setWarning('实时连接发生错误');
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      clearTimeout(connectionTimeout);
+      console.log('[WebSocket] 连接关闭:', {
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean
+      });
       setWsConnected(false);
       const isManualClose = wsManualCloseRef.current;
       wsManualCloseRef.current = false;
       if (!isManualClose && isPlaying) {
-        setWarning('实时连接已断开，请点击"开始检测"重试');
+        setWarning(`实时连接已断开 (code: ${event.code}, reason: ${event.reason || '未知原因'})，请点击"开始检测"重试`);
       }
     };
   }, [isPlaying, stopWebSocket]);
 
   const startFrameLoop = useCallback(() => {
     clearFrameLoops();
+
+    console.log('[startFrameLoop] 开始帧循环');
+    console.log('[startFrameLoop] 初始状态:', {
+      liveVideoRef: !!liveVideoRef.current,
+      liveVideoValue: liveVideoRef.current,
+      ifLiveVideoRefLive: !!liveVideoRef.current ? {
+        readyState: liveVideoRef.current?.readyState,
+        videoWidth: liveVideoRef.current?.videoWidth,
+        videoHeight: liveVideoRef.current?.videoHeight,
+        srcObject: !!liveVideoRef.current?.srcObject,
+        paused: liveVideoRef.current?.paused
+      } : 'N/A',
+      wsRef: !!wsRef.current,
+      wsReadyState: wsRef.current?.readyState,
+      cameraReady,
+      streamExists: !!stream
+    });
 
     fpsIntervalRef.current = window.setInterval(() => {
       const sent = sentFramesRef.current;
@@ -404,18 +526,42 @@ const LiveScoring: React.FC = () => {
       }
 
       const liveVideo = liveVideoRef.current;
+      const readyStateStr = ['HAVE_NOTHING', 'HAVE_METADATA', 'HAVE_CURRENT_DATA', 'HAVE_FUTURE_DATA', 'HAVE_ENOUGH_DATA'][liveVideo.readyState] || 'UNKNOWN';
+
       if (liveVideo.readyState < 2 || liveVideo.videoWidth === 0 || liveVideo.videoHeight === 0 || !liveVideo.srcObject) {
         // 减少日志频率
         if (sentFramesRef.current === 0 || !window._debugVideoLog || Date.now() - window._debugVideoLog > 2000) {
           console.log('[帧发送] 视频未就绪:', {
             readyState: liveVideo.readyState,
+            readyStateStr: readyStateStr,
             width: liveVideo.videoWidth,
             height: liveVideo.videoHeight,
             srcObject: !!liveVideo.srcObject,
+            paused: liveVideo.paused,
+            muted: liveVideo.muted,
+            autoplay: liveVideo.autoplay,
             cameraReady,
             streamExists: !!stream,
             isFullscreenCompare
           });
+
+          // 额外检查 LiveVideoPanel 的 videoRef
+          const videoElements = document.querySelectorAll('video');
+          const liveVideoEl = Array.from(videoElements).find(v => {
+            const panel = v.closest('[class*="LiveVideoPanel"]') || v.parentElement;
+            // 通过父元素的文本内容判断是否是实时画面
+            return panel && panel.textContent && panel.textContent.includes('实时画面');
+          });
+          console.log('[帧发送] DOM 中的实时画面 video 元素:', {
+            found: !!liveVideoEl,
+            ifFound: !!liveVideoEl ? {
+              readyState: liveVideoEl.readyState,
+              videoWidth: liveVideoEl.videoWidth,
+              videoHeight: liveVideoEl.videoHeight,
+              srcObject: !!liveVideoEl.srcObject
+            } : 'N/A'
+          });
+
           window._debugVideoLog = Date.now();
         }
         return;
@@ -446,7 +592,7 @@ const LiveScoring: React.FC = () => {
         console.error('[帧发送] 错误:', err);
       }
     }, 50); // 每 50ms 发送一帧，约 20 FPS
-  }, [clearFrameLoops]);
+  }, [clearFrameLoops, cameraReady, isFullscreenCompare]);
 
   const playAudio = useCallback(() => {
     if (!audioRef.current) return;
@@ -538,9 +684,15 @@ const LiveScoring: React.FC = () => {
       if (count <= 0) {
         clearInterval(countdownTimer);
         setCountdown(null);
+
+        // 先设置保护标记，防止布局切换时流被清空
+        ignoreNullStreamUpdateRef.current = true;
+        console.log('[handleStart] 保护标记已设置，准备切换布局');
+
         // 倒计时结束，进入全屏比对模式
         setIsPlaying(true);
         setIsFullscreenCompare(true);
+        console.log('[handleStart] 倒计时结束，设置全屏模式: isFullscreenCompare = true');
         startTimeRef.current = performance.now();
 
         // 确保所有媒体都从头开始
@@ -554,24 +706,93 @@ const LiveScoring: React.FC = () => {
           audioRef.current.currentTime = 0;
         }
 
-        // 短暂延迟后开始播放，确保媒体已加载
+        // 短暂延迟后开始播放，确保 media 已加载
         setTimeout(() => {
-          // 给足够时间让 LiveVideoPanel 完成挂载并设置 ref
-          setTimeout(() => {
-            const syncOffsetMs = selectedSync.sync_offset_ms || 0;
+          // 轮询等待 LiveVideoPanel 完成 ref 设置
+          const checkRefs = (attempts: number = 0) => {
+            console.log(`[checkRefs] 检查中 (${attempts + 1}/30):`, {
+              liveVideoRef: !!liveVideoRef.current,
+              liveVideoValue: liveVideoRef.current,
+              liveVideoDetails: liveVideoRef.current ? {
+                readyState: liveVideoRef.current.readyState,
+                videoWidth: liveVideoRef.current.videoWidth,
+                videoHeight: liveVideoRef.current.videoHeight,
+                srcObject: !!liveVideoRef.current.srcObject,
+                paused: liveVideoRef.current.paused
+              } : 'N/A',
+              standardVideoRef: !!standardVideoRef.current,
+              standardVideoDetails: standardVideoRef.current ? {
+                readyState: standardVideoRef.current.readyState,
+                videoWidth: standardVideoRef.current.videoWidth,
+                videoHeight: standardVideoRef.current.videoHeight,
+                src: standardVideoRef.current.src
+              } : 'N/A',
+              streamExists: !!stream
+            });
 
-            // 确保 standardVideoRef 也已正确设置
-            console.log('[handleStart] 开始启动 - liveVideoRef.current =', liveVideoRef.current);
-            console.log('[handleStart] standardVideoRef.current =', standardVideoRef.current);
+            if (liveVideoRef.current && standardVideoRef.current) {
+              // 检查实时视频是否真正就绪
+              const liveVideo = liveVideoRef.current;
+              // 双重检查 liveVideoRef 仍然有效
+              if (!liveVideo) {
+                console.error('[checkRefs] liveVideoRef.current 在检查后变为 null!');
+                setTimeout(() => checkRefs(attempts + 1), 50);
+                return;
+              }
+              const liveVideoReady = liveVideo.readyState >= 2 &&
+                                    liveVideo.videoWidth > 0 &&
+                                    liveVideo.videoHeight > 0 &&
+                                    !!liveVideo.srcObject;
 
-            // 确保标准视频从头开始
-            if (standardVideoRef.current) {
+              console.log('[checkRefs] 视频就绪检查:', {
+                liveVideoReady,
+                readyState: liveVideo.readyState,
+                readyStateStr: ['HAVE_NOTHING', 'HAVE_METADATA', 'HAVE_CURRENT_DATA', 'HAVE_FUTURE_DATA', 'HAVE_ENOUGH_DATA'][liveVideo.readyState] || 'UNKNOWN',
+                videoWidth: liveVideo.videoWidth,
+                videoHeight: liveVideo.videoHeight,
+                srcObject: !!liveVideo.srcObject,
+                paused: liveVideo.paused,
+                muted: liveVideo.muted
+              });
+
+              // 如果实时视频还未就绪，继续等待（最多再等 2 秒）
+              if (!liveVideoReady && attempts < 40) {
+                const remainingAttempts = 40 - attempts;
+                console.log(`[checkRefs] 实时视频未就绪，继续等待... (剩余 ${remainingAttempts} 次检查)`);
+
+                // 尝试播放视频来激活它
+                if (attempts === 0) {
+                  console.log('[checkRefs] 尝试播放视频来激活它');
+                  liveVideo.play().then(() => {
+                    console.log('[checkRefs] 被动播放成功');
+                  }).catch((err) => {
+                    console.log('[checkRefs] 被动播放失败（这是正常的，用户可能需要交互）:', err.message);
+                  });
+                }
+
+                setTimeout(() => checkRefs(attempts + 1), 50);
+                return;
+              }
+
+              const syncOffsetMs = selectedSync.sync_offset_ms || 0;
+              console.log('[handleStart] Refs 和视频都已就绪，开始启动');
+
+              // 确保实时视频正在播放
+              if (liveVideo.paused) {
+                console.log('[handleStart] 实时视频已暂停，尝试播放');
+                liveVideo.play().then(() => {
+                  console.log('[handleStart] 实时视频播放成功');
+                }).catch((err) => {
+                  console.error('[handleStart] 实时视频播放失败:', err);
+                });
+              }
+
+              // 确保标准视频从头开始
               const video = standardVideoRef.current;
               video.pause();
               video.currentTime = 0;
 
               // 根据偏移量延迟视频播放（与 SyncAlign 逻辑一致）
-              // sync_offset_ms 正数 = 视频晚播（延迟播放）
               if (syncOffsetMs > 0) {
                 // 视频延迟播放
                 setTimeout(() => {
@@ -589,12 +810,35 @@ const LiveScoring: React.FC = () => {
                 };
                 video.addEventListener('seeked', onSeeked);
               }
-            }
 
-            connectWebSocket(selectedAction.id, syncOffsetMs);
-            startFrameLoop();
-            startMusic();
-          }, 300); // 给 LiveVideoPanel 300ms 完成挂载和设置 ref
+              connectWebSocket(selectedAction.id, syncOffsetMs);
+              startFrameLoop();
+              startMusic();
+            } else if (attempts < 30) {
+              // 最多等待 1.5 秒（30 * 50ms）
+              console.log(`[handleStart] Refs 未就绪，等待中... (${attempts + 1}/30)`);
+              setTimeout(() => checkRefs(attempts + 1), 50);
+              return;
+            } else {
+              console.error('[handleStart] Refs 超时仍未就绪');
+              console.error('[handleStart] 超时时状态:', {
+                liveVideoRef: !!liveVideoRef.current,
+                standardVideoRef: !!standardVideoRef.current,
+                ifLiveVideoRef: !!liveVideoRef.current ? {
+                  readyState: liveVideoRef.current.readyState,
+                  videoWidth: liveVideoRef.current.videoWidth,
+                  videoHeight: liveVideoRef.current.videoHeight,
+                  srcObject: !!liveVideoRef.current.srcObject
+                } : 'N/A',
+                streamExists: !!stream,
+                cameraReady
+              });
+              setWarning('视频初始化超时，请重试');
+              setIsFullscreenCompare(false);
+              setIsPlaying(false);
+            }
+          };
+          checkRefs();
         }, 200);
       } else {
         setCountdown(count);
@@ -656,7 +900,7 @@ const LiveScoring: React.FC = () => {
 
   useEffect(() => {
     return () => {
-      stopSession(true);
+      stopSession(true, 'cleanup');
     };
   }, [stopSession]);
 
@@ -711,9 +955,31 @@ const LiveScoring: React.FC = () => {
   };
 
   const handleStreamReady = useCallback((newStream: MediaStream | null) => {
+    console.log('[handleStreamReady] 摄像头流状态变化:', {
+      streamExists: !!newStream,
+      tracks: newStream ? newStream.getTracks().map(t => ({
+        kind: t.kind,
+        id: t.id.slice(0, 8),
+        enabled: t.enabled,
+        readyState: t.readyState
+      })) : 'N/A',
+      isPlaying,
+      isFullscreenCompare,
+      currentStream: !!stream,
+      ignoreNullStreamUpdate: ignoreNullStreamUpdateRef.current
+    });
+
+    // 如果正在播放且已进入全屏模式，忽略流变化（因为这是布局切换导致的，不是真实问题）
+    if ((isPlaying && isFullscreenCompare) || ignoreNullStreamUpdateRef.current) {
+      if (newStream === null && stream !== null) {
+        console.log('[handleStreamReady] 检测进行中，忽略布局切换导致的流状态变化');
+        return;
+      }
+    }
+
     setStream(newStream);
     setCameraReady(!!newStream);
-  }, []);
+  }, [isPlaying, isFullscreenCompare, stream]);
 
   const handleVolumeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const volume = Number(event.target.value);
@@ -893,112 +1159,21 @@ const LiveScoring: React.FC = () => {
           </div>
         )}
 
-        {/* 全屏比对模式 */}
-        {isFullscreenCompare ? (
-          <div className={`h-full flex ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
-            {/* 主视频区域 - 并排大屏 */}
-            <div className="flex-1 grid grid-cols-2 gap-4">
-              {/* 标准动作视频 */}
-              <div className="flex flex-col h-full">
-                <LiveVideoPanel
-                  key="standard-video-panel"
-                  videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
-                  videoRef={standardVideoRef}
-                  title="标准动作"
-                  isActive={isPlaying && !isPaused}
-                  showSkeleton={false}
-                  className="h-full"
-                  muted
-                  loop
-                />
-              </div>
-
-              {/* 实时画面 */}
-              <div className="flex flex-col h-full">
-                <LiveVideoPanel
-                  key="live-video-panel"
-                  stream={stream}
-                  videoRef={liveVideoRef}
-                  title="实时画面"
-                  isActive={cameraReady}
-                  score={stats.current_score > 0 ? stats.current_score : undefined}
-                  keypoints={keypoints}
-                  showSkeleton
-                  className="h-full"
-                  muted
-                />
-              </div>
-            </div>
-
-            {/* 可折叠的参数面板 */}
-            <div className={`flex flex-col transition-all duration-300 ${showStatsPanel ? 'w-80 ml-4' : 'w-0 overflow-hidden'}`}>
-              <div className="bg-slate-800/95 backdrop-blur-sm rounded-2xl p-4 flex flex-col h-full">
-                {/* 面板头部 */}
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-white font-semibold flex items-center gap-2">
-                    <Zap size={18} className="text-yellow-500" />
-                    实时统计
-                  </h3>
-                  <button
-                    onClick={() => setShowStatsPanel(false)}
-                    className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-700"
-                    title="隐藏面板"
-                  >
-                    <Square size={18} />
-                  </button>
-                </div>
-
-                {/* 当前分数大显示 */}
-                <div className="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl p-6 mb-4 text-center">
-                  <div className="text-5xl font-bold text-white">{stats.current_score.toFixed(0)}</div>
-                  <div className="text-white/80 text-sm mt-1">当前分数</div>
-                </div>
-
-                {/* 详细统计数据 */}
-                <div className="flex-1 space-y-2 overflow-auto">
-                  <StatCard label="FPS" value={String(displayFps)} />
-                  <StatCard label="平均" value={stats.average_score.toFixed(0)} />
-                  <StatCard label="处理帧数" value={String(stats.frames_processed)} />
-                  <StatCard label="网络延迟" value={`${Math.round(stats.latency_ms)}ms`} />
-                  <StatCard label="音乐状态" value={stats.music_playing ? '播放中' : '未播放'} />
-                </div>
-
-                {/* 音量控制 */}
-                <div className="mt-4 pt-4 border-t border-slate-700">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400 text-xs">音量</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.1"
-                      value={stats.music_volume}
-                      onChange={handleVolumeChange}
-                      className="flex-1 accent-indigo-500"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 浮动按钮：显示统计面板 */}
-            {!showStatsPanel && (
-              <button
-                onClick={() => setShowStatsPanel(true)}
-                className="fixed bottom-6 right-6 bg-slate-800/90 backdrop-blur-sm text-white p-3 rounded-full shadow-lg hover:bg-slate-700 transition-all z-40"
-                title="显示统计面板"
-              >
-                <Zap size={24} />
-              </button>
-            )}
-          </div>
-        ) : (
-          /* 常规布局 */
-          <div className={`h-full grid grid-rows-2 gap-4 ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
-          {/* 上行：两个视频面板并排 */}
-          <div className="grid grid-cols-2 gap-4">
-            {/* 标准动作视频（静音） */}
-            <div className="flex flex-col h-full">
+        {/* 主内容区域 - 通过 isFullscreenCompare 控制布局，不条件渲染 LiveVideoPanel */}
+        <div className={`h-full ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
+          {/* 主视频区域 - 两种布局使用相同结构，通过 CSS 控制显示 */}
+          <div className={`${
+            isFullscreenCompare
+              ? 'flex h-full gap-4 pr-4' // 全屏模式：横向布局
+              : 'grid grid-rows-2 gap-4'  // 常规模式：纵向布局，两行
+          }`}>
+            {/* 第一行/左侧：两个视频面板 - 使用固定 key 避免重新挂载 */}
+            <div className={`${
+              isFullscreenCompare
+                ? 'flex-1 grid grid-cols-2 gap-4' // 全屏：并列
+                : 'grid grid-cols-2 gap-4'         // 常规：第一行并列
+            }`}>
+              {/* 标准动作视频 - 使用固定 key */}
               <LiveVideoPanel
                 key="standard-video-panel"
                 videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
@@ -1010,10 +1185,8 @@ const LiveScoring: React.FC = () => {
                 muted
                 loop
               />
-            </div>
 
-            {/* 实时画面 */}
-            <div className="flex flex-col h-full">
+              {/* 实时画面 - 使用固定 key（与全屏模式相同，避免重新挂载） */}
               <LiveVideoPanel
                 key="live-video-panel"
                 stream={stream}
@@ -1027,106 +1200,173 @@ const LiveScoring: React.FC = () => {
                 muted
               />
             </div>
-          </div>
 
-          {/* 下行：三个控制面板并排 */}
-          <div className="grid grid-cols-3 gap-4">
-            {/* 音乐选择 */}
-            <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
-              <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                <Music2 size={18} className="text-indigo-400" />
-                选择音乐
-              </h3>
-              {actionMusicList.length === 0 ? (
-                <p className="text-slate-400 text-sm">暂无可用音乐，请先到音乐库上传。</p>
-              ) : (
-                <div className="space-y-2 flex-1 overflow-auto">
-                  {actionMusicList.map((item) => (
-                    <button
-                      key={item.music_id}
-                      onClick={() => handleMusicSelect(item.music_id)}
-                      disabled={isPlaying}
-                      className={`w-full text-left px-3 py-2 rounded-lg border transition-all ${
-                        selectedMusicId === item.music_id
-                          ? 'bg-indigo-500/20 border-indigo-400 text-white'
-                          : 'bg-slate-700/40 border-slate-600 text-slate-200 hover:border-indigo-300'
-                      } disabled:opacity-50`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium truncate">{item.music_name}</span>
-                        <span className={`text-xs shrink-0 ${item.is_aligned ? 'text-green-300' : 'text-amber-300'}`}>
-                          {item.is_aligned ? '已对齐' : '未对齐'}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
+            {/* 第二行/右侧：控制面板 */}
+            <div className={`${
+              isFullscreenCompare
+                ? `flex flex-col ${showStatsPanel ? 'w-80' : 'hidden'}` // 全屏：右侧统计面板
+                : 'grid grid-cols-3 gap-4'                               // 常规：第二行三列控制面板
+            }`}>
+              {/* 音乐选择 - 只在常规模式显示 */}
+              {!isFullscreenCompare && (
+                <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
+                  <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                    <Music2 size={18} className="text-indigo-400" />
+                    选择音乐
+                  </h3>
+                  {actionMusicList.length === 0 ? (
+                    <p className="text-slate-400 text-sm">暂无可用音乐，请先到音乐库上传。</p>
+                  ) : (
+                    <div className="space-y-2 flex-1 overflow-auto">
+                      {actionMusicList.map((item) => (
+                        <button
+                          key={item.music_id}
+                          onClick={() => handleMusicSelect(item.music_id)}
+                          disabled={isPlaying}
+                          className={`w-full text-left px-3 py-2 rounded-lg border transition-all ${
+                            selectedMusicId === item.music_id
+                              ? 'bg-indigo-500/20 border-indigo-400 text-white'
+                              : 'bg-slate-700/40 border-slate-600 text-slate-200 hover:border-indigo-300'
+                          } disabled:opacity-50`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium truncate">{item.music_name}</span>
+                            <span className={`text-xs shrink-0 ${item.is_aligned ? 'text-green-300' : 'text-amber-300'}`}>
+                              {item.is_aligned ? '已对齐' : '未对齐'}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
 
-            {/* 摄像头选择 */}
-            <div className="flex flex-col h-full min-h-0">
-              <CameraSelector
-                onDeviceChange={setSelectedCamera}
-                selectedDeviceId={selectedCamera}
-                onStreamReady={handleStreamReady}
-                disabled={isPlaying}
-              />
-            </div>
+              {/* 摄像头选择 - 只在常规模式显示 */}
+              {!isFullscreenCompare && (
+                <div className="flex flex-col h-full min-h-0">
+                  <CameraSelector
+                    onDeviceChange={setSelectedCamera}
+                    selectedDeviceId={selectedCamera}
+                    onStreamReady={handleStreamReady}
+                    disabled={isPlaying}
+                  />
+                </div>
+              )}
 
-            {/* 音乐控制与实时统计 */}
-            <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
-              <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                <Music2 size={18} className="text-indigo-400" />
-                音乐控制
-              </h3>
-              {selectedMusic ? (
-                <div className="space-y-3 mb-4">
-                  <p className="text-slate-200 text-sm truncate">{selectedMusic.music_name}</p>
-                  <p className="text-slate-400 text-xs">
-                    偏移：{(selectedSync?.sync_offset_ms || 0) / 1000}s
-                  </p>
-                  {!selectedSync?.is_aligned && (
-                    <p className="text-amber-300 text-xs">当前组合未完成对齐</p>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400 text-xs">音量</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.1"
-                      value={stats.music_volume}
-                      onChange={handleVolumeChange}
-                      className="flex-1 accent-indigo-500"
-                    />
+              {/* 全屏模式统计面板 */}
+              {isFullscreenCompare && showStatsPanel && (
+                <div className="bg-slate-800/95 backdrop-blur-sm rounded-2xl p-4 flex flex-col h-full">
+                  {/* 面板头部 */}
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-white font-semibold flex items-center gap-2">
+                      <Zap size={18} className="text-yellow-500" />
+                      实时统计
+                    </h3>
+                    <button
+                      onClick={() => setShowStatsPanel(false)}
+                      className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-700"
+                      title="隐藏面板"
+                    >
+                      <Square size={18} />
+                    </button>
+                  </div>
+
+                  {/* 当前分数大显示 */}
+                  <div className="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl p-6 mb-4 text-center">
+                    <div className="text-5xl font-bold text-white">{stats.current_score.toFixed(0)}</div>
+                    <div className="text-white/80 text-sm mt-1">当前分数</div>
+                  </div>
+
+                  {/* 详细统计数据 */}
+                  <div className="flex-1 space-y-2 overflow-auto">
+                    <StatCard label="FPS" value={String(displayFps)} />
+                    <StatCard label="平均" value={stats.average_score.toFixed(0)} />
+                    <StatCard label="处理帧数" value={String(stats.frames_processed)} />
+                    <StatCard label="网络延迟" value={`${Math.round(stats.latency_ms)}ms`} />
+                    <StatCard label="音乐状态" value={stats.music_playing ? '播放中' : '未播放'} />
+                  </div>
+
+                  {/* 音量控制 */}
+                  <div className="mt-4 pt-4 border-t border-slate-700">
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400 text-xs">音量</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.1"
+                        value={stats.music_volume}
+                        onChange={handleVolumeChange}
+                        className="flex-1 accent-indigo-500"
+                      />
+                    </div>
                   </div>
                 </div>
-              ) : (
-                <p className="text-amber-300 text-sm mb-4">开始检测前必须选择音乐。</p>
               )}
 
-              <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
-                <Zap size={18} className="text-yellow-500" />
-                实时统计
-              </h3>
-              <div className="grid grid-cols-2 gap-2">
-                {(() => {
-                  console.log('[Render] displayFps =', displayFps, 'stats =', stats);
-                  return null;
-                })()}
-                <StatCard label="FPS" value={String(displayFps)} />
-                <StatCard label="分数" value={stats.current_score.toFixed(0)} />
-                <StatCard label="平均" value={stats.average_score.toFixed(0)} />
-                <StatCard label="处理帧数" value={String(stats.frames_processed)} />
-                <StatCard label="网络延迟" value={`${Math.round(stats.latency_ms)}ms`} />
-                <StatCard label="音乐状态" value={stats.music_playing ? '播放中' : '未播放'} />
-                <StatCard label="模型状态" value={modelLoaded ? '就绪' : '加载中'} />
-              </div>
+              {/* 常规模式音乐控制与实时统计 */}
+              {!isFullscreenCompare && (
+                <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
+                  <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                    <Music2 size={18} className="text-indigo-400" />
+                    音乐控制
+                  </h3>
+                  {selectedMusic ? (
+                    <div className="space-y-3 mb-4">
+                      <p className="text-slate-200 text-sm truncate">{selectedMusic.music_name}</p>
+                      <p className="text-slate-400 text-xs">
+                        偏移：{(selectedSync?.sync_offset_ms || 0) / 1000}s
+                      </p>
+                      {!selectedSync?.is_aligned && (
+                        <p className="text-amber-300 text-xs">当前组合未完成对齐</p>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400 text-xs">音量</span>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={stats.music_volume}
+                          onChange={handleVolumeChange}
+                          className="flex-1 accent-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-amber-300 text-sm mb-4">开始检测前必须选择音乐。</p>
+                  )}
+
+                  <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
+                    <Zap size={18} className="text-yellow-500" />
+                    实时统计
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <StatCard label="FPS" value={String(displayFps)} />
+                    <StatCard label="分数" value={stats.current_score.toFixed(0)} />
+                    <StatCard label="平均" value={stats.average_score.toFixed(0)} />
+                    <StatCard label="处理帧数" value={String(stats.frames_processed)} />
+                    <StatCard label="网络延迟" value={`${Math.round(stats.latency_ms)}ms`} />
+                    <StatCard label="音乐状态" value={stats.music_playing ? '播放中' : '未播放'} />
+                    <StatCard label="模型状态" value={modelLoaded ? '就绪' : '加载中'} />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
+
+          {/* 浮动按钮：显示统计面板 - 只在全屏模式隐藏面板时显示 */}
+          {isFullscreenCompare && !showStatsPanel && (
+            <button
+              onClick={() => setShowStatsPanel(true)}
+              className="fixed bottom-6 right-6 bg-slate-800/90 backdrop-blur-sm text-white p-3 rounded-full shadow-lg hover:bg-slate-700 transition-all z-40"
+              title="显示统计面板"
+            >
+              <Zap size={24} />
+            </button>
+          )}
         </div>
-        )}
 
       {(error || warning) && (
         <div className="px-6 pb-4">
