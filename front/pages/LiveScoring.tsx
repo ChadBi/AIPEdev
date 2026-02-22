@@ -1039,18 +1039,45 @@ const LiveScoring: React.FC = () => {
             </div>
             <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
               <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                <Music2 size={18} className="text-indigo-400" /> 音乐控制
+                <Music2 size={18} className="text-indigo-400" /> 音乐控制 / 对齐信息
               </h3>
-              {selectedMusic ? (
-                <div className="space-y-3 mb-4">
-                  <p className="text-slate-200 text-sm truncate">{selectedMusic.music_name}</p>
+              {syncLoading ? (
+                <div className="text-slate-400 text-sm py-4">加载对齐配置...</div>
+              ) : selectedSync ? (
+                <div className="space-y-3">
+                  {selectedMusic && (
+                    <p className="text-slate-200 text-sm truncate">{selectedMusic.music_name}</p>
+                  )}
+                  <div className={`p-2 rounded-lg ${selectedSync.is_aligned ? 'bg-green-500/10 border border-green-500/20' : 'bg-amber-500/10 border border-amber-500/20'}`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      {selectedSync.is_aligned ? <CheckCircle2 size={14} className="text-green-400" /> : <AlertCircle size={14} className="text-amber-400" />}
+                      <span className={`text-xs font-medium ${selectedSync.is_aligned ? 'text-green-400' : 'text-amber-400'}`}>
+                        {selectedSync.is_aligned ? '已对齐' : '未对齐'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      同步偏移: {selectedSync.sync_offset_ms}ms
+                      <br />
+                      <span className="text-slate-500">
+                        {selectedSync.sync_offset_ms > 0 ? `视频延迟 ${(selectedSync.sync_offset_ms / 1000).toFixed(2)} 秒播放` :
+                         selectedSync.sync_offset_ms < 0 ? `视频提前 ${Math.abs(selectedSync.sync_offset_ms / 1000).toFixed(2)} 秒播放` :
+                         '视频和音乐同时开始'}
+                      </span>
+                    </div>
+                  </div>
+                  {selectedSync.alignment_note && (
+                    <div className="text-xs text-slate-400 bg-slate-700/30 p-2 rounded">
+                      <span className="text-slate-500">备注: </span>
+                      {selectedSync.alignment_note}
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     <span className="text-slate-400 text-xs">音量</span>
                     <input type="range" min="0" max="1" step="0.1" value={stats.music_volume} onChange={handleVolumeChange} className="flex-1 accent-indigo-500" />
                   </div>
                 </div>
               ) : (
-                <p className="text-amber-300 text-sm mb-4">请选择音乐</p>
+                <p className="text-amber-300 text-sm">请选择音乐查看对齐信息</p>
               )}
             </div>
           </div>
