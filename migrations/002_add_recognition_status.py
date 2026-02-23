@@ -14,13 +14,14 @@ def migrate():
 
     # 检查字段是否已存在
     with engine.connect() as conn:
+        current_db = conn.execute(text("SELECT DATABASE()")).scalar()
         result = conn.execute(text("""
             SELECT COLUMN_NAME
             FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = 'aipe_db'
+            WHERE TABLE_SCHEMA = :schema_name
             AND TABLE_NAME = 'actions'
             AND COLUMN_NAME = 'recognition_status'
-        """))
+        """), {"schema_name": current_db})
         if result.fetchone():
             print("字段 recognition_status 已存在，跳过迁移")
             return
