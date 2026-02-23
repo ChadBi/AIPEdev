@@ -1,5 +1,104 @@
 # AIPE 项目开发进度记录
 
+## 2026-02-23 - 实时检测结果入库并接入历史页
+
+### 需求
+- 将实时检测结果持久化到数据库。
+- 在评分历史页展示实时记录，并可进入实时结果详情。
+
+### 完成内容
+- 数据库扩展：`score_records` 新增 `is_live` 与 `live_metadata` 字段。
+- 后端新增接口：
+  - `POST /scores/live`：保存实时检测结果。
+  - `GET /scores/live/{score_id}`：获取实时检测结果详情。
+- 历史接口扩展：`GET /scores/history` 增加 `is_live` 字段。
+- 前端接入：实时检测停止时自动调用保存接口，成功后跳转 `/scores/live/result/:id`。
+- 实时结果页支持按 `:id` 拉取详情，解决刷新丢失问题。
+- 历史页新增“来源”列（实时/普通），并根据来源跳转对应详情页。
+- 已执行迁移脚本：`migrations/003_add_live_fields_to_score_records.py`。
+
+### 修改文件
+- `models/score.py`
+- `crud/score.py`
+- `schemas/score.py`
+- `api/score.py`
+- `migrations/003_add_live_fields_to_score_records.py`
+- `front/types.ts`
+- `front/pages/LiveScoring.tsx`
+- `front/pages/LiveScoreResult.tsx`
+- `front/pages/ScoreHistory.tsx`
+- `front/App.tsx`
+- `progress.md`
+
+### 潜在问题
+- 实时记录目前未保存摄像头设备信息，如后续需要质量追踪可加到 `live_metadata`。
+
+## 2026-02-23 - 新增实时检测结果页
+
+### 需求
+- 实时检测结束后进入专门结果页，展示本次评分结果。
+- 结果页视觉风格参考非实时评分结果页。
+
+### 完成内容
+- 在实时检测页增加会话结果采集：记录开始时间、逐帧分数序列、结束时统计快照。
+- 点击“停止”后自动跳转到实时结果页，并通过路由 state 传递本次结果数据。
+- 新增实时结果页，展示：总评等级、平均分、峰值分、检测时长、处理帧、FPS、延迟、分数曲线。
+- 新增路由 `/scores/live/result` 并接入应用。
+
+### 修改文件
+- `front/pages/LiveScoring.tsx`
+- `front/pages/LiveScoreResult.tsx`
+- `front/App.tsx`
+- `front/types.ts`
+- `progress.md`
+
+### 潜在问题
+- 当前实时结果采用前端会话内数据（未落库），刷新结果页会丢失本次结果。
+- 若需要历史可追溯，后续可增加后端持久化接口。
+
+## 2026-02-23 - 修复实时检测顶部统计卡宽度抖动
+
+### 问题
+- 实时检测开始后，顶部统计栏（当前分数、FPS、平均分、帧数、延迟、音乐状态、音量）会随数字长度变化出现宽度抖动。
+
+### 根因
+- 顶部统计卡采用内容自适应宽度（`px-*`），数值位数变化时会触发布局重新计算，导致视觉抖动。
+
+### 完成内容
+- 为全屏顶部统计卡设置固定宽度（`w-*`）并加 `shrink-0`，避免被压缩。
+- 将分数与各数值字段增加 `tabular-nums`，确保数字切换时字形宽度稳定。
+- 音乐状态和音量区域同步固定宽度，保持整排布局稳定。
+
+### 修改文件
+- `front/pages/LiveScoring.tsx`
+- `progress.md`
+
+### 潜在问题
+- 固定宽度在极小屏幕下可能导致横向空间紧张，若后续增加更多指标，建议改为可横向滚动或分组折叠。
+
+## 2026-02-23 - 修复 actions 表缺少 recognition_status 字段
+
+### 问题
+- 后端请求 `/actions` 与 `/actions/create-from-video` 时出现 MySQL 1054 错误：`Unknown column 'actions.recognition_status' in 'field list'`。
+
+### 根因
+- `models/action.py` 已定义 `recognition_status`、`recognition_error` 字段。
+- 数据库 `actions` 表未执行对应迁移，导致 ORM 查询字段与实际表结构不一致。
+- `migrations/002_add_recognition_status.py` 中使用了固定库名 `aipe_db`，在非该库名环境下存在兼容风险。
+
+### 完成内容
+- 执行迁移脚本：`migrations/002_add_recognition_status.py`，成功补齐缺失列。
+- 修复迁移脚本：将 `TABLE_SCHEMA = 'aipe_db'` 改为动态读取 `SELECT DATABASE()`，避免环境耦合。
+- 复跑迁移脚本验证幂等：已识别字段存在并安全跳过。
+- 启动服务并请求 `GET /actions/?skip=0&limit=1`，返回 200，确认问题解决。
+
+### 修改文件
+- `migrations/002_add_recognition_status.py`
+- `progress.md`
+
+### 潜在问题
+- 其他历史迁移脚本若仍有固定库名，后续在多环境部署时可能复现类似问题，建议统一排查。
+
 ## 2026-02-21 - 完整文档创建
 
 ### 任务概述
