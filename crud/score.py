@@ -10,7 +10,9 @@ def create_score_record(
     total_score: float,
     joint_scores: dict,
     frame_scores: list,
-    feedback: list
+    feedback: list,
+    is_live: bool = False,
+    live_metadata: dict | None = None,
 ):
     """
     创建评分记录
@@ -24,6 +26,8 @@ def create_score_record(
     :param joint_scores: 关节得分详情 (字典)
     :param frame_scores: 帧级得分 (列表)
     :param feedback: 反馈建议列表
+    :param is_live: 是否为实时检测评分
+    :param live_metadata: 实时检测附加元数据
     :return: 创建后的评分记录实例
     """
     record = ScoreRecord(
@@ -34,7 +38,9 @@ def create_score_record(
         total_score=total_score,
         joint_scores=joint_scores,
         frame_scores=frame_scores,
-        feedback=feedback
+        feedback=feedback,
+        is_live=is_live,
+        live_metadata=live_metadata,
     )
     db.add(record)
     db.commit()

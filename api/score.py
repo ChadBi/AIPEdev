@@ -10,13 +10,35 @@ from crud.video import get_video_by_id
 from core.deps import get_current_user
 from models.user import User
 from models.action import Action as ActionModel
-from schemas.score import ScoreOut, ScoreHistoryItem
+from schemas.score import ScoreOut, ScoreHistoryItem, LiveScoreSaveIn, LiveScoreSaveOut, LiveScoreDetailOut
 from utils.file import normalize_storage_path
 import copy
 import logging
+from datetime import timezone
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _build_live_feedback(total_score: float, average_score: float, latency_ms: int) -> list[str]:
+    """根据实时检测结果生成简要反馈"""
+    feedback: list[str] = []
+    if total_score >= 90:
+        feedback.append("实时动作表现优秀，稳定性较好。")
+    elif total_score >= 75:
+        feedback.append("实时动作整体良好，可继续提升细节稳定性。")
+    elif total_score >= 60:
+        feedback.append("实时动作达到及格水平，建议加强关键动作控制。")
+    else:
+        feedback.append("实时动作还需改进，建议降低节奏并分解练习。")
+
+    if average_score < 70:
+        feedback.append("全程平均分偏低，建议先进行慢速跟练。")
+
+    if latency_ms > 100:
+        feedback.append("检测延迟偏高，建议检查网络和设备性能。")
+
+    return feedback
 
 @router.get("/test", response_model=dict)
 def test_endpoint():
@@ -177,6 +199,114 @@ def score(
     }
 
 
+@router.post("/live", response_model=LiveScoreSaveOut)
+def save_live_score(
+    payload: LiveScoreSaveIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    保存实时检测评分结果
+    """
+    action = get_action_by_id(db, payload.action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    frame_scores = []
+    for index, frame in enumerate(payload.frame_scores):
+        frame_scores.append({
+            "frame_index": index,
+            "score": frame.score,
+            "timestamp": frame.timestamp,
+        })
+
+    live_metadata = {
+        "music_id": payload.music_id,
+        "music_name": payload.music_name,
+        "started_at": payload.started_at.astimezone(timezone.utc).isoformat(),
+        "ended_at": payload.ended_at.astimezone(timezone.utc).isoformat(),
+        "duration_seconds": payload.duration_seconds,
+        "current_score": payload.current_score,
+        "average_score": payload.average_score,
+        "frames_processed": payload.frames_processed,
+        "display_fps": payload.display_fps,
+        "latency_ms": payload.latency_ms,
+    }
+
+    feedback = _build_live_feedback(payload.total_score, payload.average_score, payload.latency_ms)
+
+    record = create_score_record(
+        db=db,
+        user_id=current_user.id,
+        action_id=payload.action_id,
+        video_id=None,
+        student_video_delay=0.0,
+        total_score=payload.total_score,
+        joint_scores={},
+        frame_scores=frame_scores,
+        feedback=feedback,
+        is_live=True,
+        live_metadata=live_metadata,
+    )
+
+    return LiveScoreSaveOut(score_id=record.id)
+
+
+@router.get("/live/{score_id}", response_model=LiveScoreDetailOut)
+def get_live_score_detail(
+    score_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取实时检测评分详情
+    """
+    record = get_score_by_id(db, score_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Score record not found")
+
+    if record.user_id is not None and record.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this score")
+
+    if not record.is_live:
+        raise HTTPException(status_code=404, detail="Live score record not found")
+
+    action = get_action_by_id(db, record.action_id)
+    action_name = action.name if action else f"动作#{record.action_id}"
+
+    metadata = record.live_metadata or {}
+    frame_scores = []
+    for fs in record.frame_scores or []:
+        if isinstance(fs, dict):
+            frame_scores.append({
+                "frame_index": fs.get("frame_index", 0),
+                "score": fs.get("score", 0.0),
+                "timestamp": fs.get("timestamp", 0.0),
+            })
+
+    started_at = metadata.get("started_at") or record.created_at.isoformat()
+    ended_at = metadata.get("ended_at") or record.created_at.isoformat()
+
+    return LiveScoreDetailOut(
+        score_id=record.id,
+        action_id=record.action_id,
+        action_name=action_name,
+        music_id=metadata.get("music_id"),
+        music_name=metadata.get("music_name"),
+        started_at=started_at,
+        ended_at=ended_at,
+        duration_seconds=float(metadata.get("duration_seconds", 0.0)),
+        total_score=record.total_score,
+        current_score=float(metadata.get("current_score", record.total_score)),
+        average_score=float(metadata.get("average_score", record.total_score)),
+        frames_processed=int(metadata.get("frames_processed", len(frame_scores))),
+        display_fps=int(metadata.get("display_fps", 0)),
+        latency_ms=int(metadata.get("latency_ms", 0)),
+        frame_scores=frame_scores,
+        created_at=record.created_at,
+    )
+
+
 @router.get("/history/count", response_model=dict)
 def score_history_count(
     db: Session = Depends(get_db),
@@ -218,6 +348,7 @@ def score_history(
             total_score=record.total_score,
             joint_scores=record.joint_scores,
             feedback=record.feedback,
+            is_live=bool(record.is_live),
             created_at=record.created_at
         ))
     
