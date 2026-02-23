@@ -24,6 +24,7 @@ import {
   CheckCircle2,
   ArrowLeft,
   Music2,
+  Settings,
 } from 'lucide-react';
 
 type LiveStage = 'select' | 'detect';
@@ -62,9 +63,9 @@ function buildWsBaseUrl(): string {
   if (configuredBase) {
     if (configuredBase.startsWith('https://')) return configuredBase.replace('https://', 'wss://');
     if (configuredBase.startsWith('http://')) return configuredBase.replace('http://', 'ws://');
+    return configuredBase;
   }
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${window.location.host}`;
+  return '';
 }
 
 const LiveScoring: React.FC = () => {
@@ -100,10 +101,38 @@ const LiveScoring: React.FC = () => {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
 
+  useEffect(() => {
+    console.log('[LiveScoring] stream 状态变化:', {
+      exists: !!stream,
+      trackCount: stream ? stream.getTracks().length : 0,
+      trackDetails: stream ? stream.getTracks().map(t => ({
+        kind: t.kind,
+        id: t.id.slice(0, 12),
+        enabled: t.enabled
+      })) : 'N/A'
+    });
+  }, [stream]);
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [isFullscreenCompare, setIsFullscreenCompare] = useState(false);
+  const [showStatsPanel, setShowStatsPanel] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
+
+  const isPlayingRef = useRef(false);
+  const isFullscreenCompareRef = useRef(false);
+  const ignoreNullStreamUpdateRef = useRef(false);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  useEffect(() => {
+    isFullscreenCompareRef.current = isFullscreenCompare;
+  }, [isFullscreenCompare]);
   const [stats, setStats] = useState<LiveStats>(DEFAULT_STATS);
+  const [displayFps, setDisplayFps] = useState(0);
   const [keypoints, setKeypoints] = useState<Keypoints | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -120,6 +149,9 @@ const LiveScoring: React.FC = () => {
   const standardVideoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const initialMusicAppliedRef = useRef(false);
+
+  // 保存流，避免组件重新挂载时丢失
+  const persistedStreamRef = useRef<MediaStream | null>(null);
 
   const clearFrameLoops = useCallback(() => {
     if (frameIntervalRef.current) {
@@ -160,7 +192,16 @@ const LiveScoring: React.FC = () => {
     setWsConnected(false);
   }, []);
 
-  const stopSession = useCallback((stopCamera: boolean) => {
+  const stopSession = useCallback((stopCamera: boolean, reason: string = 'unknown') => {
+    console.log('[stopSession] 调用，参数:', stopCamera, '原因:', reason);
+    const currentIsPlaying = isPlayingRef.current;
+    const currentIsFullscreen = isFullscreenCompareRef.current;
+
+    if (reason === 'cleanup' && currentIsFullscreen && currentIsPlaying) {
+      console.log('[stopSession] 检测进行中，忽略组件重新挂载导致的 cleanup');
+      return;
+    }
+
     clearFrameLoops();
     stopWebSocket();
     stopAudio();
@@ -179,11 +220,19 @@ const LiveScoring: React.FC = () => {
 
     setIsPlaying(false);
     setIsPaused(false);
+    setIsFullscreenCompare(false);
+    if (reason !== 'cleanup') {
+      ignoreNullStreamUpdateRef.current = false;
+    } else {
+      console.log('[stopSession] 组件卸载 cleanup，保持保护标记不重置');
+    }
+    setShowStatsPanel(true);
     setStats(prev => ({
       ...DEFAULT_STATS,
       music_volume: prev.music_volume,
     }));
-  }, [clearFrameLoops, stopAudio, stopWebSocket, stream]);
+    setDisplayFps(0);
+  }, [clearFrameLoops, stopAudio, stopWebSocket, stream, isPaused]);
 
   const fetchLiveActions = useCallback(async () => {
     setLoading(true);
@@ -237,10 +286,15 @@ const LiveScoring: React.FC = () => {
   }, [initialActionId, initialVideoId]);
 
   useEffect(() => {
+    console.log('[全屏状态] isFullscreenCompare 变化:', isFullscreenCompare);
+    console.log('[全屏状态] isPlaying:', isPlaying);
+    console.log('[全屏状态] countdown:', countdown);
+  }, [isFullscreenCompare, isPlaying, countdown]);
+
+  useEffect(() => {
     fetchLiveActions();
   }, [fetchLiveActions]);
 
-  // 检查模型加载状态
   useEffect(() => {
     checkModelStatus()
       .then((status) => {
@@ -325,10 +379,26 @@ const LiveScoring: React.FC = () => {
 
   const connectWebSocket = useCallback((actionId: number, syncOffsetMs: number) => {
     stopWebSocket();
-    const ws = new WebSocket(`${buildWsBaseUrl()}/ws/live/action/${actionId}?sync_offset_ms=${syncOffsetMs}`);
+
+    const wsBaseUrl = buildWsBaseUrl();
+    const wsUrl = `${wsBaseUrl}/ws/live/action/${actionId}?sync_offset_ms=${syncOffsetMs}`;
+
+    console.log('[WebSocket] 正在建立连接:', wsUrl);
+
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
+    const connectionTimeout = setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        console.error('[WebSocket] 连接超时');
+        ws.close();
+        setWarning('WebSocket连接超时，请检查网络或后端服务');
+      }
+    }, 10000);
+
     ws.onopen = () => {
+      clearTimeout(connectionTimeout);
+      console.log('[WebSocket] 连接成功建立');
       setWsConnected(true);
       setWarning('');
     };
@@ -345,28 +415,32 @@ const LiveScoring: React.FC = () => {
             frames_processed: payload.processed_frames,
             latency_ms: Math.max(0, Math.round(performance.now() - startTimeRef.current - payload.elapsed_ms)),
           }));
-          // 更新关键点数据用于骨架绘制
           if (payload.keypoints) {
             setKeypoints(payload.keypoints);
           }
         } else if (message.type === 'error') {
+          console.error('[WebSocket] 收到错误消息:', message);
           setWarning(message.data?.message || '实时检测出现错误');
         }
-      } catch {
+      } catch (err) {
+        console.error('[WebSocket] 解析消息失败:', err);
         setWarning('收到无法解析的实时消息');
       }
     };
 
-    ws.onerror = () => {
+    ws.onerror = (error) => {
+      clearTimeout(connectionTimeout);
+      console.error('[WebSocket] 发生错误:', error);
       setWarning('实时连接发生错误');
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      clearTimeout(connectionTimeout);
       setWsConnected(false);
       const isManualClose = wsManualCloseRef.current;
       wsManualCloseRef.current = false;
       if (!isManualClose && isPlaying) {
-        setWarning('实时连接已断开，请点击"开始检测"重试');
+        setWarning(`实时连接已断开`);
       }
     };
   }, [isPlaying, stopWebSocket]);
@@ -375,38 +449,50 @@ const LiveScoring: React.FC = () => {
     clearFrameLoops();
 
     fpsIntervalRef.current = window.setInterval(() => {
-      setStats(prev => ({ ...prev, fps: sentFramesRef.current }));
+      const sent = sentFramesRef.current;
+      setDisplayFps(sent);
       sentFramesRef.current = 0;
     }, 1000);
 
     frameIntervalRef.current = window.setInterval(() => {
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-      if (!liveVideoRef.current) return;
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      if (!liveVideoRef.current) {
+        return;
+      }
 
       const liveVideo = liveVideoRef.current;
-      if (liveVideo.readyState < 2 || liveVideo.videoWidth === 0 || liveVideo.videoHeight === 0) return;
 
-      if (!captureCanvasRef.current) {
-        captureCanvasRef.current = document.createElement('canvas');
+      if (liveVideo.readyState < 2 || liveVideo.videoWidth === 0 || liveVideo.videoHeight === 0 || !liveVideo.srcObject) {
+        return;
       }
-      const canvas = captureCanvasRef.current;
-      canvas.width = 320;
-      canvas.height = 240;
-      const context = canvas.getContext('2d');
-      if (!context) return;
-      context.drawImage(liveVideo, 0, 0, canvas.width, canvas.height);
 
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-      const elapsedMs = Math.round(performance.now() - startTimeRef.current);
-      wsRef.current.send(JSON.stringify({
-        type: 'frame',
-        data: {
-          image_base64: dataUrl,
-          elapsed_ms: elapsedMs,
-        },
-      }));
-      sentFramesRef.current += 1;
-    }, 200);
+      try {
+        if (!captureCanvasRef.current) {
+          captureCanvasRef.current = document.createElement('canvas');
+        }
+        const canvas = captureCanvasRef.current;
+        canvas.width = 640;
+        canvas.height = 480;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        if (!context) return;
+        context.drawImage(liveVideo, 0, 0, canvas.width, canvas.height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        const elapsedMs = Math.round(performance.now() - startTimeRef.current);
+        wsRef.current.send(JSON.stringify({
+          type: 'frame',
+          data: {
+            image_base64: dataUrl,
+            elapsed_ms: elapsedMs,
+          },
+        }));
+        sentFramesRef.current += 1;
+      } catch (err) {
+        console.error('[帧发送] 错误:', err);
+      }
+    }, 50);
   }, [clearFrameLoops]);
 
   const playAudio = useCallback(() => {
@@ -416,61 +502,30 @@ const LiveScoring: React.FC = () => {
       .catch(() => setWarning('音乐播放失败，请检查浏览器媒体权限'));
   }, []);
 
-  const scheduleMusicPlay = useCallback((delayMs: number) => {
-    clearMusicDelayTimer();
-    pendingMusicDelayRef.current = delayMs;
-    musicDelayStartedAtRef.current = performance.now();
-    setStats(prev => ({ ...prev, music_playing: false }));
+  const initAudio = useCallback(() => {
+    if (!selectedMusic) return false;
 
-    musicDelayTimerRef.current = window.setTimeout(() => {
-      pendingMusicDelayRef.current = 0;
-      musicDelayStartedAtRef.current = 0;
-      playAudio();
-    }, delayMs);
-  }, [clearMusicDelayTimer, playAudio]);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
 
-  const startMusic = useCallback(() => {
-    if (!selectedMusic) return;
-
-    const offsetMs = selectedSync?.sync_offset_ms || 0;
     const audio = new Audio(getMusicUrl(selectedMusic.music_file_path));
     audio.volume = stats.music_volume;
     audio.preload = 'auto';
+    audio.currentTime = 0;
     audioRef.current = audio;
+    return true;
+  }, [selectedMusic, stats.music_volume]);
 
-    if (offsetMs > 0) {
-      audio.currentTime = offsetMs / 1000;
-      playAudio();
-      return;
-    }
-
-    if (offsetMs < 0) {
-      scheduleMusicPlay(Math.abs(offsetMs));
-      return;
-    }
-
+  const startMusic = useCallback(() => {
+    if (!audioRef.current) return;
     playAudio();
-  }, [playAudio, scheduleMusicPlay, selectedMusic, selectedSync?.sync_offset_ms, stats.music_volume]);
+  }, [playAudio]);
 
   const handleStart = useCallback(() => {
-    if (!selectedAction) {
-      setError('请先选择标准动作');
-      return;
-    }
-    if (!selectedAction.video_path) {
-      setError('该动作未绑定标准视频，无法开始实时检测');
-      return;
-    }
-    if (!selectedMusicId || !selectedMusic) {
-      setError('请先选择音乐');
-      return;
-    }
-    if (!cameraReady || !stream) {
-      setError('请先选择并启动摄像头');
-      return;
-    }
-    if (syncLoading || !selectedSync) {
-      setError('正在加载动作与音乐对齐配置，请稍候重试');
+    if (!selectedAction || !selectedAction.video_path || !selectedMusicId || !selectedMusic || !cameraReady || !stream || syncLoading || !selectedSync) {
       return;
     }
 
@@ -480,21 +535,257 @@ const LiveScoring: React.FC = () => {
     } else {
       setWarning('');
     }
-    setIsPlaying(true);
+
+    setIsPlaying(false);
     setIsPaused(false);
+    setCountdown(5);
     setStats(prev => ({ ...DEFAULT_STATS, music_volume: prev.music_volume }));
+    setDisplayFps(0);
+    setKeypoints(null);
 
-    startTimeRef.current = performance.now();
-    connectWebSocket(selectedAction.id, selectedSync.sync_offset_ms || 0);
-    startFrameLoop();
-    startMusic();
+    let count = 5;
+    const countdownTimer = setInterval(() => {
+      count -= 1;
+      if (count <= 0) {
+        clearInterval(countdownTimer);
+        setCountdown(null);
 
-    if (standardVideoRef.current) {
-      standardVideoRef.current.currentTime = 0;
-      standardVideoRef.current.play().catch(() => {
-        setWarning('标准动作视频播放失败，请重试');
-      });
-    }
+        ignoreNullStreamUpdateRef.current = true;
+        console.log('[handleStart] 保护标记已设置，准备切换布局');
+
+        setIsPlaying(true);
+        setIsFullscreenCompare(true);
+        console.log('[handleStart] 倒计时结束，设置全屏模式');
+        startTimeRef.current = performance.now();
+
+        if (standardVideoRef.current) {
+          standardVideoRef.current.pause();
+          standardVideoRef.current.currentTime = 0;
+        }
+
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+        }
+
+        setTimeout(() => {
+          const checkRefs = (attempts: number = 0) => {
+            if (liveVideoRef.current && standardVideoRef.current) {
+              const liveVideo = liveVideoRef.current;
+              const liveVideoReady = liveVideo.readyState >= 2 &&
+                                    liveVideo.videoWidth > 0 &&
+                                    liveVideo.videoHeight > 0 &&
+                                    !!liveVideo.srcObject;
+
+              if (!liveVideoReady && attempts < 40) {
+                setTimeout(() => checkRefs(attempts + 1), 50);
+                return;
+              }
+
+              if (liveVideo.paused) {
+                liveVideo.play().catch(console.error);
+              }
+
+              const video = standardVideoRef.current;
+              console.log('[播放控制] 获取标准视频引用:', {
+                videoExists: !!video,
+                videoElementId: video?.id,
+                videoSrc: video?.src,
+                videoWidth: video?.videoWidth,
+                videoHeight: video?.videoHeight,
+                readyState: video?.readyState
+              });
+              if (!video) {
+                console.error('[播放控制] 错误：standardVideoRef.current 为空！无法播放视频');
+                setWarning('标准视频元素未找到，请重新加载页面');
+                return;
+              }
+              video.pause();
+              video.currentTime = 0;
+
+              const syncOffsetMs = selectedSync.sync_offset_ms || 0;
+
+              // 先初始化音频（加载但不播放）
+              const audioInitialized = initAudio();
+              if (!audioInitialized) {
+                setWarning('初始化音频失败');
+                return;
+              }
+
+              // 调试日志
+              console.log('[播放控制] 同步偏移量信息:', {
+                syncOffsetMs,
+                type: typeof syncOffsetMs,
+                selectedSync: selectedSync
+              });
+
+              // 根据 sync_offset_ms 决定播放顺序
+              // sync_offset_ms > 0：音乐先播，视频延迟播放（视频晚于音乐）
+              // sync_offset_ms < 0：视频先播，音乐延迟播放（视频早于音乐）
+              // sync_offset_ms == 0：同时开始播放
+
+              if (syncOffsetMs > 0) {
+                // 音乐立即播放，视频延迟
+                console.log('[播放控制] syncOffsetMs > 0，音乐先播，视频延迟', syncOffsetMs, 'ms');
+
+                // 立即播放音乐
+                startMusic();
+
+                // 延迟播放视频
+                setTimeout(() => {
+                  // 使用 current 而不是捕获的 video 变量，确保引用的是当前 DOM 中的视频元素
+                  const playStandardVideo = (retryCount = 0) => {
+                    const currentVideo = standardVideoRef.current;
+                    if (!currentVideo) {
+                      console.error('[播放控制] 延迟触发时无法获取标准视频引用');
+                      return;
+                    }
+
+                    console.log('[播放控制] 延迟触发，检查标准视频状态:', {
+                      elapsedMs: syncOffsetMs,
+                      currentTime: currentVideo.currentTime,
+                      paused: currentVideo.paused,
+                      readyState: currentVideo.readyState,
+                      readyStateStr: ['HAVE_NOTHING', 'HAVE_METADATA', 'HAVE_CURRENT_DATA', 'HAVE_FUTURE_DATA', 'HAVE_ENOUGH_DATA'][currentVideo.readyState] || 'UNKNOWN',
+                      videoWidth: currentVideo.videoWidth,
+                      videoHeight: currentVideo.videoHeight,
+                      videoExists: !!currentVideo.src,
+                      retryCount
+                    });
+
+                    // 重试直到视频尺寸加载完成
+                    if (currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
+                      if (retryCount < 50) {
+                        console.log('[播放控制] 视频尺寸未加载完成，100ms 后重试...');
+                        setTimeout(() => playStandardVideo(retryCount + 1), 100);
+                        return;
+                      } else {
+                        console.error('[播放控制] 视频尺寸加载超时，强制播放');
+                      }
+                    }
+
+                    // 直接播放视频（不设置 currentTime）
+                    currentVideo.play().then(() => {
+                      console.log('[播放控制] 标准视频播放成功，当前时间:', currentVideo.currentTime);
+                    }).catch((err) => {
+                      console.error('[播放控制] 标准动作视频播放失败:', {
+                        name: err.name,
+                        message: err.message
+                      });
+                      setWarning('标准动作视频播放失败，请重试');
+                    });
+                  };
+                  playStandardVideo();
+                }, syncOffsetMs);
+
+              } else if (syncOffsetMs < 0) {
+                // 视频立即播放，音乐延迟
+                const musicDelayMs = Math.abs(syncOffsetMs);
+                console.log('[播放控制] syncOffsetMs < 0，视频先播，音乐延迟', musicDelayMs, 'ms');
+
+                // 等待视频加载完成后播放
+                const playStandardVideo = (retryCount = 0) => {
+                  const currentVideo = standardVideoRef.current;
+                  if (!currentVideo) {
+                    console.error('[播放控制] 无法获取标准视频引用');
+                    return;
+                  }
+
+                  if (currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
+                    if (retryCount < 50) {
+                      setTimeout(() => playStandardVideo(retryCount + 1), 100);
+                      return;
+                    }
+                  }
+
+                  currentVideo.currentTime = 0;
+                  currentVideo.play().catch(() => {
+                    setWarning('标准动作视频播放失败，请重试');
+                  });
+                  console.log('[播放控制] 标准视频立即播放');
+
+                  // 延迟后播放音乐
+                  setTimeout(() => {
+                    startMusic();
+                    console.log('[播放控制] 音乐开始播放（延迟后）');
+                  }, musicDelayMs);
+                };
+
+                const video = standardVideoRef.current;
+                if (video) {
+                  // 添加事件监听器确保视频加载完成
+                  const onLoaded = () => {
+                    video.removeEventListener('loadedmetadata', onLoaded);
+                    video.removeEventListener('canplay', onLoaded);
+                    playStandardVideo();
+                  };
+                  video.addEventListener('loadedmetadata', onLoaded);
+                  video.addEventListener('canplay', onLoaded);
+                  // 如果视频已经加载，直接播放
+                  if (video.videoWidth > 0) {
+                    playStandardVideo();
+                  }
+                }
+
+              } else {
+                // 偏移量为0，同时播放
+                console.log('[播放控制] syncOffsetMs == 0，同时开始播放');
+                startMusic();
+
+                // 等待视频加载完成后播放
+                const playStandardVideo = (retryCount = 0) => {
+                  const currentVideo = standardVideoRef.current;
+                  if (!currentVideo) {
+                    console.error('[播放控制] 无法获取标准视频引用');
+                    return;
+                  }
+
+                  if (currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
+                    if (retryCount < 50) {
+                      setTimeout(() => playStandardVideo(retryCount + 1), 100);
+                      return;
+                    }
+                  }
+
+                  currentVideo.currentTime = 0;
+                  currentVideo.play().catch(() => {
+                    setWarning('标准动作视频播放失败，请重试');
+                  });
+                  console.log('[播放控制] 标准视频开始播放（同步）');
+                };
+
+                const video = standardVideoRef.current;
+                if (video) {
+                  const onLoaded = () => {
+                    video.removeEventListener('loadedmetadata', onLoaded);
+                    video.removeEventListener('canplay', onLoaded);
+                    playStandardVideo();
+                  };
+                  video.addEventListener('loadedmetadata', onLoaded);
+                  video.addEventListener('canplay', onLoaded);
+                  if (video.videoWidth > 0) {
+                    playStandardVideo();
+                  }
+                }
+              }
+
+              connectWebSocket(selectedAction.id, syncOffsetMs);
+              startFrameLoop();
+            } else if (attempts < 30) {
+              setTimeout(() => checkRefs(attempts + 1), 50);
+              return;
+            } else {
+              setWarning('视频初始化超时，请重试');
+              setIsFullscreenCompare(false);
+              setIsPlaying(false);
+            }
+          };
+          checkRefs();
+        }, 200);
+      } else {
+        setCountdown(count);
+      }
+    }, 1000);
   }, [
     cameraReady,
     connectWebSocket,
@@ -503,9 +794,11 @@ const LiveScoring: React.FC = () => {
     selectedMusicId,
     selectedSync,
     startFrameLoop,
-    startMusic,
+    initAudio,
     stream,
     syncLoading,
+    startMusic,
+    playAudio,
   ]);
 
   const handleTogglePause = useCallback(() => {
@@ -519,9 +812,7 @@ const LiveScoring: React.FC = () => {
         standardVideoRef.current.play().catch(() => {});
       }
 
-      if (pendingMusicDelayRef.current > 0) {
-        scheduleMusicPlay(pendingMusicDelayRef.current);
-      } else if (audioRef.current) {
+      if (audioRef.current) {
         playAudio();
       }
       return;
@@ -534,24 +825,20 @@ const LiveScoring: React.FC = () => {
       standardVideoRef.current.pause();
     }
 
-    if (musicDelayTimerRef.current && pendingMusicDelayRef.current > 0) {
-      const elapsed = performance.now() - musicDelayStartedAtRef.current;
-      pendingMusicDelayRef.current = Math.max(0, pendingMusicDelayRef.current - elapsed);
-      clearMusicDelayTimer();
-      setStats(prev => ({ ...prev, music_playing: false }));
-    } else if (audioRef.current) {
+    if (audioRef.current) {
       audioRef.current.pause();
       setStats(prev => ({ ...prev, music_playing: false }));
     }
-  }, [clearFrameLoops, clearMusicDelayTimer, isPaused, isPlaying, playAudio, scheduleMusicPlay, startFrameLoop]);
+  }, [clearFrameLoops, isPaused, isPlaying, playAudio, startFrameLoop]);
 
   const handleStop = useCallback(() => {
+    console.log('[handleStop] 停止按钮被点击');
     stopSession(false);
   }, [stopSession]);
 
   useEffect(() => {
     return () => {
-      stopSession(true);
+      stopSession(true, 'cleanup');
     };
   }, [stopSession]);
 
@@ -605,10 +892,35 @@ const LiveScoring: React.FC = () => {
     navigate('/scores/live', { replace: true });
   };
 
+  const goToSyncAlign = () => {
+    if (!selectedActionId || !selectedMusicId) return;
+    navigate(`/sync-align?action_id=${selectedActionId}&music_id=${selectedMusicId}`);
+  };
+
   const handleStreamReady = useCallback((newStream: MediaStream | null) => {
+    console.log('[handleStreamReady] 摄像头流状态变化:', {
+      streamExists: !!newStream,
+      isPlaying,
+      isFullscreenCompare,
+      currentStream: !!stream,
+      persistedStream: !!persistedStreamRef.current,
+      ignoreNullStreamUpdate: ignoreNullStreamUpdateRef.current
+    });
+
+    if ((isPlaying && isFullscreenCompare) || ignoreNullStreamUpdateRef.current) {
+      if (newStream === null && stream !== null) {
+        console.log('[handleStreamReady] 检测进行中，忽略布局切换导致的流状态变化');
+        return;
+      }
+    }
+
+    if (newStream) {
+      persistedStreamRef.current = newStream;
+    }
+
     setStream(newStream);
     setCameraReady(!!newStream);
-  }, []);
+  }, [isPlaying, isFullscreenCompare, stream]);
 
   const handleVolumeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const volume = Number(event.target.value);
@@ -653,12 +965,6 @@ const LiveScoring: React.FC = () => {
             <AlertCircle className="mx-auto text-slate-300 mb-4" size={56} />
             <h2 className="text-xl font-bold text-slate-900 mb-2">没有可用于实时检测的动作</h2>
             <p className="text-slate-500 mb-6">请先在动作库创建并上传标准视频</p>
-            <button
-              onClick={() => navigate('/actions/create')}
-              className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700"
-            >
-              去创建动作
-            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -685,7 +991,6 @@ const LiveScoring: React.FC = () => {
                 <div className="p-5">
                   <h3 className="font-bold text-slate-900 text-lg">{action.name}</h3>
                   <p className="text-sm text-slate-500 mt-2 line-clamp-2">{action.description}</p>
-                  <div className="mt-4 text-indigo-600 font-semibold text-sm">选择动作并继续</div>
                 </div>
               </button>
             ))}
@@ -700,10 +1005,7 @@ const LiveScoring: React.FC = () => {
       <div className="max-w-xl mx-auto py-12 text-center">
         <AlertCircle className="mx-auto text-red-400 mb-4" size={64} />
         <h2 className="text-2xl font-bold text-slate-900 mb-3">未找到动作</h2>
-        <button
-          onClick={backToSelect}
-          className="px-6 py-3 bg-indigo-600 text-white rounded-xl"
-        >
+        <button onClick={backToSelect} className="px-6 py-3 bg-indigo-600 text-white rounded-xl">
           返回动作选择
         </button>
       </div>
@@ -711,79 +1013,130 @@ const LiveScoring: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col">
-      <header className="bg-slate-800 border-b border-slate-700 px-6 py-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={backToSelect}
-              className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700"
-              title="返回动作选择"
-            >
-              <ArrowLeft size={18} />
-            </button>
-            <div>
-              <h1 className="text-xl font-bold text-white">实时检测 - {selectedAction.name}</h1>
-              <p className="text-sm text-slate-400">
-                {selectedSync?.is_aligned ? '已对齐' : '未对齐'}
-                {' · '}
-                {wsConnected ? '实时连接已建立' : '实时连接未建立'}
-                {' · '}
-                <span className={modelLoaded ? 'text-green-400' : 'text-amber-400'}>
-                  {modelLoaded ? '模型已就绪' : '模型加载中...'}
-                </span>
-              </p>
+    <div className={`min-h-screen bg-slate-900 flex flex-col ${isFullscreenCompare ? 'fixed inset-0 z-50' : ''}`}>
+      {/* header - 常规模式显示 */}
+      {!isFullscreenCompare && (
+        <header className="bg-slate-800 border-b border-slate-700 px-6 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <button onClick={backToSelect} className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700">
+                <ArrowLeft size={18} />
+              </button>
+              <div>
+                <h1 className="text-xl font-bold text-white">实时检测 - {selectedAction.name}</h1>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {!isPlaying ? (
+                <button onClick={handleStart} disabled={!canStart} className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 disabled:opacity-50">
+                  <Play size={18} /> 开始检测
+                </button>
+              ) : (
+                <>
+                  <button onClick={handleTogglePause} className="flex items-center gap-2 px-6 py-3 bg-amber-600 text-white font-semibold rounded-xl hover:bg-amber-700">
+                    {isPaused ? <Play size={18} /> : <Pause size={18} />}
+                    {isPaused ? '继续' : '暂停'}
+                  </button>
+                  <button onClick={handleStop} className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white font-semibold rounded-xl hover:bg-red-700">
+                    <Square size={18} /> 停止
+                  </button>
+                </>
+              )}
             </div>
           </div>
+        </header>
+      )}
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate(`/sync/align?action_id=${selectedActionId}`)}
-              disabled={!selectedActionId}
-              className="flex items-center gap-2 px-4 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              title="进入音乐对齐页面"
-            >
-              <Music2 size={18} />
-              音乐对齐
-            </button>
-            {!isPlaying ? (
-              <button
-                onClick={handleStart}
-                disabled={!canStart}
-                className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Play size={18} />
-                开始检测
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={handleTogglePause}
-                  className="flex items-center gap-2 px-6 py-3 bg-amber-600 text-white font-semibold rounded-xl hover:bg-amber-700"
-                >
-                  {isPaused ? <Play size={18} /> : <Pause size={18} />}
-                  {isPaused ? '继续' : '暂停'}
-                </button>
-                <button
-                  onClick={handleStop}
-                  className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white font-semibold rounded-xl hover:bg-red-700"
-                >
-                  <Square size={18} />
-                  停止
-                </button>
-              </>
-            )}
+      <div className={`flex-1 ${isFullscreenCompare ? 'flex flex-col overflow-hidden' : 'p-6'}`}>
+        {/* 倒计时覆盖层 */}
+        {countdown !== null && (
+          <div className="absolute inset-0 flex items-center justify-center z-50 bg-slate-900/80 backdrop-blur-sm">
+            <div className="text-center">
+              <div className="text-8xl font-bold text-white mb-4 animate-pulse">{countdown}</div>
+              <div className="text-white text-lg">即将开始检测...</div>
+            </div>
           </div>
-        </div>
-      </header>
+        )}
 
-      <div className="flex-1 p-6 overflow-hidden">
-        <div className="h-full grid grid-rows-2 gap-4">
-          {/* 上行：两个视频面板并排 */}
-          <div className="grid grid-cols-2 gap-4">
-            {/* 标准动作视频（静音） */}
-            <div className="flex flex-col h-full">
+        {/* 始终渲染两个 LiveVideoPanel - 防止重新挂载 */}
+        {/* 全屏模式布局 */}
+        {isFullscreenCompare && (
+          <div className={`h-full flex flex-col ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
+            {/* 全屏顶部控制栏 */}
+            <div className="bg-slate-800/95 backdrop-blur-sm border-b border-slate-700 px-4 py-2 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-4">
+              {/* 当前分数 */}
+              <div className="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg px-4 py-2 text-center">
+                <div className="text-3xl font-bold text-white">{stats.current_score.toFixed(0)}</div>
+                <div className="text-white/80 text-xs">当前分数</div>
+              </div>
+              <div className="flex gap-2">
+                {/* FPS */}
+                <div className="bg-slate-700/50 rounded px-3 py-1">
+                  <span className="text-slate-400 text-xs">FPS</span>
+                  <span className="text-white font-bold ml-1">{displayFps}</span>
+                </div>
+                {/* 平均分 */}
+                <div className="bg-slate-700/50 rounded px-3 py-1">
+                  <span className="text-slate-400 text-xs">平均分</span>
+                  <span className="text-white font-bold ml-1">{stats.average_score.toFixed(1)}</span>
+                </div>
+                {/* 帧数 */}
+                <div className="bg-slate-700/50 rounded px-3 py-1">
+                  <span className="text-slate-400 text-xs">帧数</span>
+                  <span className="text-white font-bold ml-1">{stats.frames_processed}</span>
+                </div>
+                {/* 延迟 */}
+                <div className="bg-slate-700/50 rounded px-3 py-1">
+                  <span className="text-slate-400 text-xs">延迟</span>
+                  <span className="text-white font-bold ml-1">{stats.latency_ms}ms</span>
+                </div>
+                {/* 音乐状态 */}
+                <div className="bg-slate-700/50 rounded px-3 py-1 flex items-center gap-1">
+                  <Music2 size={14} className={stats.music_playing ? 'text-green-400' : 'text-slate-400'} />
+                  <span className={`text-xs font-medium ${stats.music_playing ? 'text-green-400' : 'text-slate-400'}`}>
+                    {stats.music_playing ? '播放中' : '未播放'}
+                  </span>
+                </div>
+              </div>
+              {/* 音量控制 */}
+              <div className="flex items-center gap-2 bg-slate-700/50 rounded px-3 py-1">
+                <span className="text-slate-400 text-xs">音量</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={stats.music_volume}
+                  onChange={handleVolumeChange}
+                  className="w-20 accent-indigo-500"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={handleTogglePause} className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white font-semibold rounded-lg hover:bg-amber-700">
+                {isPaused ? <Play size={18} /> : <Pause size={18} />}
+                {isPaused ? '继续' : '暂停'}
+              </button>
+              <button onClick={handleStop} className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700">
+                <Square size={18} /> 停止
+              </button>
+            </div>
+            {/* 隐藏的 CameraSelector，用于在全屏模式保持流 */}
+            <div className="hidden">
+              <CameraSelector
+                onDeviceChange={setSelectedCamera}
+                selectedDeviceId={selectedCamera}
+                onStreamReady={handleStreamReady}
+                disabled={isPlaying}
+                preserveStreamOnUnmount={true}
+              />
+            </div>
+          </div>
+          <div className="flex-1 grid grid-cols-2 gap-0">
+            <div className="relative border-r border-slate-700">
               <LiveVideoPanel
+                key="standard-video-panel"
                 videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
                 videoRef={standardVideoRef}
                 title="标准动作"
@@ -794,11 +1147,10 @@ const LiveScoring: React.FC = () => {
                 loop
               />
             </div>
-
-            {/* 实时画面 */}
-            <div className="flex flex-col h-full">
+            <div className="relative">
               <LiveVideoPanel
-                stream={stream}
+                key="live-video-panel"
+                stream={stream || persistedStreamRef.current || undefined}
                 videoRef={liveVideoRef}
                 title="实时画面"
                 isActive={cameraReady}
@@ -810,43 +1162,67 @@ const LiveScoring: React.FC = () => {
               />
             </div>
           </div>
+        </div>
+        )}
 
-          {/* 下行：三个控制面板并排 */}
+        {!isFullscreenCompare && (
+          <div className={`h-full grid grid-rows-2 gap-4 ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
+            <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col h-full">
+              <LiveVideoPanel
+                key="standard-video-panel"
+                videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
+                videoRef={standardVideoRef}
+                title="标准动作"
+                isActive={isPlaying && !isPaused}
+                showSkeleton={false}
+                className="h-full"
+                muted
+                loop
+              />
+            </div>
+            <div className="flex flex-col h-full">
+              <LiveVideoPanel
+                key="live-video-panel"
+                stream={stream || persistedStreamRef.current || undefined}
+                videoRef={liveVideoRef}
+                title="实时画面"
+                isActive={cameraReady}
+                score={stats.current_score > 0 ? stats.current_score : undefined}
+                keypoints={keypoints}
+                showSkeleton
+                className="h-full"
+                muted
+              />
+            </div>
+          </div>
           <div className="grid grid-cols-3 gap-4">
-            {/* 音乐选择 */}
             <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
               <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                <Music2 size={18} className="text-indigo-400" />
-                选择音乐
+                <Music2 size={18} className="text-indigo-400" /> 选择音乐
               </h3>
-              {actionMusicList.length === 0 ? (
-                <p className="text-slate-400 text-sm">暂无可用音乐，请先到音乐库上传。</p>
-              ) : (
-                <div className="space-y-2 flex-1 overflow-auto">
-                  {actionMusicList.map((item) => (
-                    <button
-                      key={item.music_id}
-                      onClick={() => handleMusicSelect(item.music_id)}
-                      disabled={isPlaying}
-                      className={`w-full text-left px-3 py-2 rounded-lg border transition-all ${
-                        selectedMusicId === item.music_id
-                          ? 'bg-indigo-500/20 border-indigo-400 text-white'
-                          : 'bg-slate-700/40 border-slate-600 text-slate-200 hover:border-indigo-300'
-                      } disabled:opacity-50`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium truncate">{item.music_name}</span>
-                        <span className={`text-xs shrink-0 ${item.is_aligned ? 'text-green-300' : 'text-amber-300'}`}>
-                          {item.is_aligned ? '已对齐' : '未对齐'}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
+              <div className="space-y-2 flex-1 overflow-auto">
+                {actionMusicList.map((item) => (
+                  <button
+                    key={item.music_id}
+                    onClick={() => handleMusicSelect(item.music_id)}
+                    disabled={isPlaying}
+                    className={`w-full text-left px-3 py-2 rounded-lg border transition-all ${
+                      selectedMusicId === item.music_id
+                        ? 'bg-indigo-500/20 border-indigo-400 text-white'
+                        : 'bg-slate-700/40 border-slate-600 text-slate-200 hover:border-indigo-300'
+                    } disabled:opacity-50`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium truncate">{item.music_name}</span>
+                      <span className={`text-xs shrink-0 ${item.is_aligned ? 'text-green-300' : 'text-amber-300'}`}>
+                        {item.is_aligned ? '已对齐' : '未对齐'}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
-
-            {/* 摄像头选择 */}
             <div className="flex flex-col h-full min-h-0">
               <CameraSelector
                 onDeviceChange={setSelectedCamera}
@@ -855,76 +1231,70 @@ const LiveScoring: React.FC = () => {
                 disabled={isPlaying}
               />
             </div>
-
-            {/* 音乐控制与实时统计 */}
             <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
               <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                <Music2 size={18} className="text-indigo-400" />
-                音乐控制
+                <Music2 size={18} className="text-indigo-400" /> 音乐控制 / 对齐信息
               </h3>
-              {selectedMusic ? (
-                <div className="space-y-3 mb-4">
-                  <p className="text-slate-200 text-sm truncate">{selectedMusic.music_name}</p>
-                  <p className="text-slate-400 text-xs">
-                    偏移：{(selectedSync?.sync_offset_ms || 0) / 1000}s
-                  </p>
-                  {!selectedSync?.is_aligned && (
-                    <p className="text-amber-300 text-xs">当前组合未完成对齐</p>
+              {syncLoading ? (
+                <div className="text-slate-400 text-sm py-4">加载对齐配置...</div>
+              ) : selectedSync ? (
+                <div className="space-y-3">
+                  {selectedMusic && (
+                    <p className="text-slate-200 text-sm truncate">{selectedMusic.music_name}</p>
                   )}
+                  <div className={`p-2 rounded-lg ${selectedSync.is_aligned ? 'bg-green-500/10 border border-green-500/20' : 'bg-amber-500/10 border border-amber-500/20'}`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      {selectedSync.is_aligned ? <CheckCircle2 size={14} className="text-green-400" /> : <AlertCircle size={14} className="text-amber-400" />}
+                      <span className={`text-xs font-medium ${selectedSync.is_aligned ? 'text-green-400' : 'text-amber-400'}`}>
+                        {selectedSync.is_aligned ? '已对齐' : '未对齐'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      同步偏移: {selectedSync.sync_offset_ms}ms
+                      <br />
+                      <span className="text-slate-500">
+                        {selectedSync.sync_offset_ms > 0 ? `视频延迟 ${(selectedSync.sync_offset_ms / 1000).toFixed(2)} 秒播放` :
+                         selectedSync.sync_offset_ms < 0 ? `视频提前 ${Math.abs(selectedSync.sync_offset_ms / 1000).toFixed(2)} 秒播放` :
+                         '视频和音乐同时开始'}
+                      </span>
+                    </div>
+                  </div>
+                  {selectedSync.alignment_note && (
+                    <div className="text-xs text-slate-400 bg-slate-700/30 p-2 rounded">
+                      <span className="text-slate-500">备注: </span>
+                      {selectedSync.alignment_note}
+                    </div>
+                  )}
+                  <button
+                    onClick={goToSyncAlign}
+                    disabled={isPlaying}
+                    className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                  >
+                    <Settings size={14} />
+                    对齐设置
+                  </button>
                   <div className="flex items-center gap-2">
                     <span className="text-slate-400 text-xs">音量</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.1"
-                      value={stats.music_volume}
-                      onChange={handleVolumeChange}
-                      className="flex-1 accent-indigo-500"
-                    />
+                    <input type="range" min="0" max="1" step="0.1" value={stats.music_volume} onChange={handleVolumeChange} className="flex-1 accent-indigo-500" />
                   </div>
                 </div>
               ) : (
-                <p className="text-amber-300 text-sm mb-4">开始检测前必须选择音乐。</p>
+                <p className="text-amber-300 text-sm">请选择音乐查看对齐信息</p>
               )}
-
-              <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
-                <Zap size={18} className="text-yellow-500" />
-                实时统计
-              </h3>
-              <div className="grid grid-cols-2 gap-2">
-                <StatCard label="FPS" value={String(stats.fps)} />
-                <StatCard label="分数" value={stats.current_score.toFixed(0)} />
-                <StatCard label="平均" value={stats.average_score.toFixed(0)} />
-                <StatCard label="延迟" value={`${Math.round(stats.latency_ms)}ms`} />
-              </div>
             </div>
           </div>
         </div>
-      </div>
+        )}
 
-      {(error || warning) && (
-        <div className="px-6 pb-4">
-          {error && (
-            <div className="mb-2 p-3 bg-red-500/20 text-red-300 rounded-xl text-sm">{error}</div>
-          )}
-          {warning && (
-            <div className="p-3 bg-amber-500/20 text-amber-300 rounded-xl text-sm">{warning}</div>
-          )}
-        </div>
-      )}
+        {(error || warning) && !isFullscreenCompare && (
+          <div className="mt-4">
+            {error && <div className="mb-2 p-3 bg-red-500/20 text-red-300 rounded-xl text-sm">{error}</div>}
+            {warning && <div className="p-3 bg-amber-500/20 text-amber-300 rounded-xl text-sm">{warning}</div>}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
-
-const StatCard: React.FC<{
-  label: string;
-  value: string;
-}> = ({ label, value }) => (
-  <div className="bg-slate-700/50 rounded-xl p-3">
-    <div className="text-slate-400 text-xs mb-1">{label}</div>
-    <div className="text-lg font-bold text-slate-100">{value}</div>
-  </div>
-);
 
 export default LiveScoring;

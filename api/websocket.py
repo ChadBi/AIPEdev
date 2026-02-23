@@ -13,7 +13,8 @@ from core.database import SessionLocal
 from core.config import SAMPLE_FPS
 from crud import video as video_crud
 from crud import action as action_crud
-from services.recognition_service import recognize_video, recognize_frame_base64
+from services.recognition_service import recognize_frame_base64
+from services.background_recognition import get_action_keypoints_safely
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -128,7 +129,8 @@ async def _handle_live_session(
                 continue
 
             now = time.monotonic()
-            if now - last_emit_at < 0.2:
+            # 减少节流限制，从 0.1 秒改为 0.05 秒（约 20 FPS）
+            if now - last_emit_at < 0.05:
                 continue
             last_emit_at = now
 
@@ -152,7 +154,7 @@ async def _handle_live_session(
                 continue
 
             # 获取标准动作关键点用于骨架绘制
-            _, standard_frame = _select_standard_keypoints(
+            std_idx, standard_frame = _select_standard_keypoints(
                 standard_sequence=standard_sequence,
                 elapsed_ms=elapsed_ms,
                 sync_offset_ms=sync_offset_ms,
@@ -206,8 +208,11 @@ def _load_standard_by_action(db: Session, action_id: int) -> tuple[list[dict], i
         raise HTTPException(status_code=404, detail="动作不存在")
     if not action.video_path:
         raise HTTPException(status_code=400, detail="动作未绑定标准视频，无法实时检测")
-    standard_result = recognize_video(action.video_path)
-    return standard_result.get("sequence", []), int(action.sync_offset_ms or 0)
+
+    # 从数据库获取预保存的关键点序列
+    standard_sequence = get_action_keypoints_safely(db, action_id)
+
+    return standard_sequence, int(action.sync_offset_ms or 0)
 
 
 @router.websocket("/live/{video_id}")
