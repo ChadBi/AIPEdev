@@ -7,6 +7,9 @@ import {
   Action,
   ActionMusicSyncListItem,
   ActionMusicSyncLookup,
+  LiveResultData,
+  LiveResultFrame,
+  LiveScoreSavePayload,
   LiveStats,
   LiveWsScorePayload,
   Keypoints,
@@ -133,6 +136,8 @@ const LiveScoring: React.FC = () => {
   }, [isFullscreenCompare]);
   const [stats, setStats] = useState<LiveStats>(DEFAULT_STATS);
   const [displayFps, setDisplayFps] = useState(0);
+  const [liveFrameScores, setLiveFrameScores] = useState<LiveResultFrame[]>([]);
+  const [sessionStartedAt, setSessionStartedAt] = useState<string | null>(null);
   const [keypoints, setKeypoints] = useState<Keypoints | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -232,6 +237,8 @@ const LiveScoring: React.FC = () => {
       music_volume: prev.music_volume,
     }));
     setDisplayFps(0);
+    setLiveFrameScores([]);
+    setSessionStartedAt(null);
   }, [clearFrameLoops, stopAudio, stopWebSocket, stream, isPaused]);
 
   const fetchLiveActions = useCallback(async () => {
@@ -415,6 +422,13 @@ const LiveScoring: React.FC = () => {
             frames_processed: payload.processed_frames,
             latency_ms: Math.max(0, Math.round(performance.now() - startTimeRef.current - payload.elapsed_ms)),
           }));
+          setLiveFrameScores(prev => ([
+            ...prev,
+            {
+              timestamp: Number((payload.elapsed_ms / 1000).toFixed(2)),
+              score: payload.current_score,
+            },
+          ]));
           if (payload.keypoints) {
             setKeypoints(payload.keypoints);
           }
@@ -541,6 +555,8 @@ const LiveScoring: React.FC = () => {
     setCountdown(5);
     setStats(prev => ({ ...DEFAULT_STATS, music_volume: prev.music_volume }));
     setDisplayFps(0);
+    setLiveFrameScores([]);
+    setSessionStartedAt(null);
     setKeypoints(null);
 
     let count = 5;
@@ -557,6 +573,7 @@ const LiveScoring: React.FC = () => {
         setIsFullscreenCompare(true);
         console.log('[handleStart] 倒计时结束，设置全屏模式');
         startTimeRef.current = performance.now();
+        setSessionStartedAt(new Date().toISOString());
 
         if (standardVideoRef.current) {
           standardVideoRef.current.pause();
@@ -831,10 +848,79 @@ const LiveScoring: React.FC = () => {
     }
   }, [clearFrameLoops, isPaused, isPlaying, playAudio, startFrameLoop]);
 
-  const handleStop = useCallback(() => {
+  const handleStop = useCallback(async () => {
     console.log('[handleStop] 停止按钮被点击');
+    if (isPlaying && selectedAction) {
+      const endedAt = new Date().toISOString();
+      const startedAt = sessionStartedAt || endedAt;
+      const durationMs = Math.max(0, Date.parse(endedAt) - Date.parse(startedAt));
+      const durationSeconds = Number((durationMs / 1000).toFixed(2));
+      const finalAverageScore = stats.average_score > 0 ? stats.average_score : stats.current_score;
+
+      const resultData: LiveResultData = {
+        action_id: selectedAction.id,
+        action_name: selectedAction.name,
+        music_id: selectedMusic?.music_id ?? null,
+        music_name: selectedMusic?.music_name ?? null,
+        started_at: startedAt,
+        ended_at: endedAt,
+        duration_seconds: durationSeconds,
+        total_score: Number(finalAverageScore.toFixed(1)),
+        current_score: Number(stats.current_score.toFixed(1)),
+        average_score: Number(finalAverageScore.toFixed(1)),
+        frames_processed: stats.frames_processed,
+        display_fps: displayFps,
+        latency_ms: stats.latency_ms,
+        frame_scores: liveFrameScores,
+      };
+
+      stopSession(false);
+
+      const savePayload: LiveScoreSavePayload = {
+        action_id: resultData.action_id,
+        music_id: resultData.music_id,
+        music_name: resultData.music_name,
+        started_at: resultData.started_at,
+        ended_at: resultData.ended_at,
+        duration_seconds: resultData.duration_seconds,
+        total_score: resultData.total_score,
+        current_score: resultData.current_score,
+        average_score: resultData.average_score,
+        frames_processed: resultData.frames_processed,
+        display_fps: resultData.display_fps,
+        latency_ms: resultData.latency_ms,
+        frame_scores: resultData.frame_scores.map((item, index) => ({
+          frame_index: index,
+          score: item.score,
+          timestamp: item.timestamp,
+        })),
+      };
+
+      try {
+        const res = await api.post('/scores/live', savePayload);
+        const scoreId = res.data?.score_id as number | undefined;
+        if (scoreId) {
+          navigate(`/scores/live/result/${scoreId}`, {
+            state: {
+              resultData: {
+                ...resultData,
+                score_id: scoreId,
+              },
+            },
+          });
+          return;
+        }
+      } catch (err: any) {
+        const detail = err?.response?.data?.detail;
+        setWarning(typeof detail === 'string' ? `结果保存失败：${detail}` : '结果保存失败，已展示本地结果');
+      }
+
+      navigate('/scores/live/result', { state: { resultData } });
+      return;
+    }
+
     stopSession(false);
-  }, [stopSession]);
+  }, [displayFps, isPlaying, liveFrameScores, navigate, selectedAction, selectedMusic, sessionStartedAt, stats, stopSession]);
 
   useEffect(() => {
     return () => {
@@ -1066,33 +1152,33 @@ const LiveScoring: React.FC = () => {
             <div className="bg-slate-800/95 backdrop-blur-sm border-b border-slate-700 px-4 py-2 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-4">
               {/* 当前分数 */}
-              <div className="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg px-4 py-2 text-center">
-                <div className="text-3xl font-bold text-white">{stats.current_score.toFixed(0)}</div>
+              <div className="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg w-24 py-2 text-center shrink-0">
+                <div className="text-3xl font-bold text-white tabular-nums">{stats.current_score.toFixed(0)}</div>
                 <div className="text-white/80 text-xs">当前分数</div>
               </div>
               <div className="flex gap-2">
                 {/* FPS */}
-                <div className="bg-slate-700/50 rounded px-3 py-1">
+                <div className="bg-slate-700/50 rounded w-24 px-3 py-1 flex items-center justify-between shrink-0">
                   <span className="text-slate-400 text-xs">FPS</span>
-                  <span className="text-white font-bold ml-1">{displayFps}</span>
+                  <span className="text-white font-bold ml-1 tabular-nums">{displayFps}</span>
                 </div>
                 {/* 平均分 */}
-                <div className="bg-slate-700/50 rounded px-3 py-1">
+                <div className="bg-slate-700/50 rounded w-28 px-3 py-1 flex items-center justify-between shrink-0">
                   <span className="text-slate-400 text-xs">平均分</span>
-                  <span className="text-white font-bold ml-1">{stats.average_score.toFixed(1)}</span>
+                  <span className="text-white font-bold ml-1 tabular-nums">{stats.average_score.toFixed(1)}</span>
                 </div>
                 {/* 帧数 */}
-                <div className="bg-slate-700/50 rounded px-3 py-1">
+                <div className="bg-slate-700/50 rounded w-24 px-3 py-1 flex items-center justify-between shrink-0">
                   <span className="text-slate-400 text-xs">帧数</span>
-                  <span className="text-white font-bold ml-1">{stats.frames_processed}</span>
+                  <span className="text-white font-bold ml-1 tabular-nums">{stats.frames_processed}</span>
                 </div>
                 {/* 延迟 */}
-                <div className="bg-slate-700/50 rounded px-3 py-1">
+                <div className="bg-slate-700/50 rounded w-24 px-3 py-1 flex items-center justify-between shrink-0">
                   <span className="text-slate-400 text-xs">延迟</span>
-                  <span className="text-white font-bold ml-1">{stats.latency_ms}ms</span>
+                  <span className="text-white font-bold ml-1 tabular-nums">{stats.latency_ms}ms</span>
                 </div>
                 {/* 音乐状态 */}
-                <div className="bg-slate-700/50 rounded px-3 py-1 flex items-center gap-1">
+                <div className="bg-slate-700/50 rounded w-24 px-3 py-1 flex items-center justify-center gap-1 shrink-0">
                   <Music2 size={14} className={stats.music_playing ? 'text-green-400' : 'text-slate-400'} />
                   <span className={`text-xs font-medium ${stats.music_playing ? 'text-green-400' : 'text-slate-400'}`}>
                     {stats.music_playing ? '播放中' : '未播放'}
@@ -1100,7 +1186,7 @@ const LiveScoring: React.FC = () => {
                 </div>
               </div>
               {/* 音量控制 */}
-              <div className="flex items-center gap-2 bg-slate-700/50 rounded px-3 py-1">
+              <div className="flex items-center gap-2 bg-slate-700/50 rounded w-36 px-3 py-1 shrink-0">
                 <span className="text-slate-400 text-xs">音量</span>
                 <input
                   type="range"

@@ -65,6 +65,7 @@ const ScoreHistory: React.FC = () => {
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-100">
                 <th className="px-6 py-4 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">练习动作</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">来源</th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">评分得分</th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">评估日期</th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">关联动作</th>
@@ -75,7 +76,7 @@ const ScoreHistory: React.FC = () => {
               {loading ? (
                 [1,2,3].map(i => (
                   <tr key={i}>
-                    <td colSpan={5} className="px-6 py-4"><div className="h-10 bg-slate-50 animate-pulse rounded-lg"></div></td>
+                    <td colSpan={6} className="px-6 py-4"><div className="h-10 bg-slate-50 animate-pulse rounded-lg"></div></td>
                   </tr>
                 ))
               ) : filteredHistory.length > 0 ? (
@@ -89,6 +90,11 @@ const ScoreHistory: React.FC = () => {
                           <span className="font-bold text-slate-900">{item.action_name}</span>
                        </div>
                     </td>
+                        <td className="px-6 py-4">
+                          <span className={`px-3 py-1 rounded-lg text-xs font-bold ${item.is_live ? 'bg-purple-50 text-purple-600 border border-purple-100' : 'bg-slate-100 text-slate-600 border border-slate-200'}`}>
+                           {item.is_live ? '实时' : '普通'}
+                          </span>
+                        </td>
                     <td className="px-6 py-4">
                        <span className={`px-4 py-1 rounded-lg text-sm font-black border ${getScoreBg(item.total_score)}`}>
                          {item.total_score.toFixed(1)}
@@ -105,7 +111,7 @@ const ScoreHistory: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 text-right">
                        <Link 
-                         to={`/scores/result/${item.id}`} 
+                         to={item.is_live ? `/scores/live/result/${item.id}` : `/scores/result/${item.id}`} 
                          className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 text-xs font-bold rounded-xl hover:bg-indigo-600 hover:text-white transition-all"
                        >
                           查看详情
@@ -116,7 +122,7 @@ const ScoreHistory: React.FC = () => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={5} className="px-6 py-20 text-center">
+                  <td colSpan={6} className="px-6 py-20 text-center">
                      <History className="w-12 h-12 text-slate-200 mx-auto mb-4" />
                      <p className="text-slate-500">暂无评分历史记录</p>
                   </td>
