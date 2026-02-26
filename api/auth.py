@@ -14,6 +14,27 @@ from crud import user as user_crud
 
 router = APIRouter(tags=["Auth"])
 
+# ========= 简单的JSON格式登录（调试用）==========
+
+@router.post("/simple-login")
+def simple_login(user_data: UserLogin, db: Session = Depends(get_db)):
+    """
+    简单JSON格式登录（调试用）
+    """
+    db_user = user_crud.get_user_by_username(db, user_data.username)
+    if not db_user:
+        raise HTTPException(status_code=400, detail="用户名或密码错误")
+
+    if not verify_password(user_data.password, db_user.hashed_password):
+        raise HTTPException(status_code=400, detail="用户名或密码错误")
+
+    token = create_access_token(db_user.id)
+
+    return {
+        "access_token": token,
+        "token_type": "bearer"
+    }
+
 # ========= 注册 =========
 
 @router.post("/register")

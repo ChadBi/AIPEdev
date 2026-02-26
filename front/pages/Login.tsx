@@ -19,13 +19,10 @@ const LoginPage: React.FC = () => {
     setLoading(true);
 
     try {
-      // API expects OAuth2 password grant form data
-      const formData = new URLSearchParams();
-      formData.append('username', username);
-      formData.append('password', password);
-
-      const res = await api.post('/auth/login', formData, {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      // 使用简单的JSON格式登录
+      const res = await api.post('/auth/simple-login', {
+        username,
+        password
       });
 
       const { access_token } = res.data;

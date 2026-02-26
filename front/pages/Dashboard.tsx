@@ -4,14 +4,15 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../App';
 import api from '../api';
 import { Action, ScoreHistoryItem } from '../types';
-import { 
-  Play, 
-  Library, 
-  History, 
-  TrendingUp, 
+import {
+  Play,
+  Library,
+  History,
+  TrendingUp,
   ArrowRight,
   Plus,
-  Video
+  Video,
+  Activity
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -113,6 +114,10 @@ const Dashboard: React.FC = () => {
           <Link to="/videos/upload" className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-2xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100">
             <Plus className="w-5 h-5" />
             上传视频
+          </Link>
+          <Link to="/posture/assess" className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold rounded-2xl hover:from-purple-700 hover:to-indigo-700 transition-all shadow-lg shadow-purple-100">
+            <Activity className="w-5 h-5" />
+            体态检测
           </Link>
         </div>
       </div>

@@ -1,0 +1,26 @@
+体态检测功能修复总结：
+========================
+
+1. 修复的问题：
+   - recognize_frame_base64返回格式不匹配：修改为返回{'keypoints', 'width', 'height', 'confidence'}字典
+   - 骨架分析API端点HTTP方法错误：从GET改为POST
+   - 体态检测API响应格式不匹配：修改为返回完整数据库对象格式
+   - 启用mock模式：修改config.yaml中的use_mock为true
+   - 添加了详细日志记录用于调试
+
+2. 修改的文件：
+   - services/recognition_service.py
+   - api/posture.py
+   - config.yaml
+   - services/posture_service.py
+
+3. 测试结果：
+   - API正常返回200状态码
+   - 成功上传4张照片
+   - 关键点识别正常（17个关键点）
+   - 评分计算正常（70分）
+   - 照片保存到数据库正常
+
+4. 后台服务：
+   - 运行在端口9999
+   - 使用热重载模式（--reload）

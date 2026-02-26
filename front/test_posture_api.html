@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>体态检测API直接测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #results {
+            margin-top: 20px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>体态检测API直接测试</h1>
+
+        <div class="info">
+            <strong>服务状态：</strong>
+            <div id="status">检查中...</div>
+        </div>
+
+        <div>
+            <h3>测试步骤：</h3>
+            <button onclick="testLogin()">1. 测试登录</button>
+            <button onclick="testHealthCheck()">2. 健康检查</button>
+            <button onclick="testPostureAPI()">3. 体态检测API</button>
+        </div>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:9999';
+        let authToken = '';
+
+        async function log(message, type = 'info') {
+            const resultsDiv = document.getElementById('results');
+            const time = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${type}`;
+            logEntry.innerHTML = `[${time}] ${message}`;
+            resultsDiv.appendChild(logEntry);
+            if (type === 'error') {
+                document.querySelector('.container').insertBefore(
+                    document.createElement('div'),
+                    document.querySelector('button')
+                ).className = `error ${type}`;
+            }
+        }
+
+        async function checkServices() {
+            try {
+                // 检查后端
+                const healthResp = await fetch(`${API_BASE}/health`);
+                const backendStatus = healthResp.ok ? '✅ 后端正常运行' : '❌ 后端异常';
+                document.getElementById('status').innerHTML = backendStatus;
+
+                // 检查前端
+                const frontendResp = await fetch(window.location.href);
+                const frontendStatus = frontendResp.ok ? '✅ 前端正常运行' : '❌ 前端异常';
+                document.getElementById('status').innerHTML += `<br>${frontendStatus}`;
+
+            } catch (error) {
+                document.getElementById('status').innerHTML = `❌ 服务检查失败: ${error.message}`;
+            }
+        }
+
+        async function testLogin() {
+            try {
+                log('开始登录测试...', 'info');
+
+                const response = await fetch(`${API_BASE}/auth/simple-login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: 'admin',
+                        password: 'admin123'
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`登录失败: ${response.status}`);
+                }
+
+                const data = await response.json();
+                authToken = data.access_token;
+                log(`✅ 登录成功! Token: ${authToken.substring(0, 20)}...`, 'success');
+
+                // 保存token到localStorage
+                localStorage.setItem('access_token', authToken);
+                log('✅ Token已保存到localStorage', 'success');
+
+            } catch (error) {
+                log(`❌ 登录失败: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        async function testHealthCheck() {
+            try {
+                log('检查后端健康状态...', 'info');
+
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    log(`✅ 后端健康: ${data.message}`, 'success');
+                    log(`时间戳: ${data.timestamp}`, 'info');
+                } else {
+                    throw new Error(`健康检查失败: ${response.status}`);
+                }
+
+            } catch (error) {
+                log(`❌ 健康检查失败: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        async function testPostureAPI() {
+            try {
+                if (!authToken) {
+                    await testLogin();
+                    if (!authToken) {
+                        throw new Error('无法获取认证token');
+                    }
+                }
+
+                // 创建测试图像
+                log('创建测试图像...', 'info');
+                const canvas = document.createElement('canvas');
+                canvas.width = 100;
+                canvas.height = 100;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#gray';
+                ctx.fillRect(0, 0, 100, 100);
+
+                // 转换为Blob
+                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.95));
+                log(`✅ 测试图像创建成功 (${blob.size} bytes)`, 'success');
+
+                // 构建FormData
+                const formData = new FormData();
+                formData.append('front_photo', blob, 'test_front.jpg');
+                formData.append('left_side_photo', blob, 'test_left.jpg');
+                formData.append('right_side_photo', blob, 'test_right.jpg');
+                formData.append('back_photo', blob, 'test_back.jpg');
+                formData.append('assessment_type', 'routine');
+                formData.append('age', '30');
+                formData.append('height', '175');
+                formData.append('weight', '70');
+
+                log('发送体态检测API请求...', 'info');
+
+                const response = await fetch(`${API_BASE}/posture/assess`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: formData
+                });
+
+                log(`API响应状态: ${response.status}`, 'info');
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`API调用失败 (${response.status}): ${errorText}`);
+                }
+
+                const data = await response.json();
+                log(`✅ 体态检测成功!`, 'success');
+                log(`评估ID: ${data.assessment?.id}`, 'info');
+                log(`综合评分: ${data.overall_score}`, 'info');
+                log(`照片数量: ${data.photos?.length}`, 'info');
+                log(`检测问题: ${data.detected_issues?.length}`, 'info');
+
+                // 显示完整响应
+                log('完整响应数据:', 'info');
+                log(JSON.stringify(data, null, 2), 'info');
+
+            } catch (error) {
+                log(`❌ 体态检测失败: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        // 页面加载时检查服务状态
+        window.addEventListener('load', checkServices);
+    </script>
+</body>
+</html>

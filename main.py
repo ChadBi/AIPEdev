@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from api import auth, user, action, video, recognize, score, music, sync_config, action_music_sync
+from api import auth, user, action, video, recognize, score, music, sync_config, action_music_sync, posture
 from api.websocket import router as ws_router
 from core.config import UPLOAD_DIR
 import os
@@ -48,6 +48,7 @@ app.include_router(action_music_sync.router, prefix="/sync", tags=["动作音乐
 app.include_router(recognize.router, prefix="/recognize", tags=["识别模块"])
 app.include_router(score.router, prefix="/scores", tags=["评分模块"])
 app.include_router(ws_router, prefix="/ws", tags=["实时检测模块"])
+app.include_router(posture.router, prefix="/posture", tags=["体态检测模块"])
 
 # 健康检查端点
 @app.get("/health")

@@ -28,6 +28,8 @@ import UserProfile from './pages/UserProfile';
 import MusicLibrary from './pages/MusicLibrary';
 import SyncAlign from './pages/SyncAlign';
 import LiveScoring from './pages/LiveScoring';
+import PostureAssessment from './pages/PostureAssessment';
+import PostureHistory from './pages/PostureHistory';
 import Layout from './components/Layout';
 
 // Auth Context
@@ -118,6 +120,8 @@ const AppContent: React.FC = () => {
             <Route path="/scores/live" element={<LiveScoring />} />
             <Route path="/music" element={<MusicLibrary />} />
             <Route path="/sync/align" element={<SyncAlign />} />
+            <Route path="/posture/assess" element={<PostureAssessment />} />
+            <Route path="/posture/history" element={<PostureHistory />} />
             <Route path="/profile" element={<UserProfile />} />
             <Route path="/users/me" element={<UserProfile />} />
           </Route>
