@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Camera, RefreshCw, AlertCircle, Video } from 'lucide-react';
+import { Camera, RefreshCw, ChevronDown } from 'lucide-react';
 import { CameraDevice } from '../types';
 
 interface CameraSelectorProps {
@@ -20,7 +20,7 @@ const CameraSelector: React.FC<CameraSelectorProps> = ({
   const [devices, setDevices] = useState<CameraDevice[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [permissionGranted, setPermissionGranted] = useState(false);
+  const [, setPermissionGranted] = useState(false);
   const currentStreamRef = useRef<MediaStream | null>(null);
   const lastStartedDeviceIdRef = useRef<string | null>(null);
   const onStreamReadyRef = useRef(onStreamReady);
@@ -168,84 +168,38 @@ const CameraSelector: React.FC<CameraSelectorProps> = ({
   }, [stopStream, preserveStreamOnUnmount]);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-          <Camera size={18} className="text-indigo-600" />
-          摄像头选择
-        </h3>
-        <button
-          onClick={enumerateDevices}
-          disabled={loading || disabled}
-          className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-          title="刷新设备列表"
-        >
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-        </button>
+    <div className="relative group">
+      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-300 z-10">
+        <Camera size={16} />
       </div>
-
-      {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl flex items-center gap-2 text-red-600 text-sm">
-          <AlertCircle size={16} />
-          {error}
-        </div>
-      )}
-
-      {devices.length === 0 && !loading && !error && (
-        <div className="text-center py-6 text-slate-500">
-          <Video size={32} className="mx-auto mb-2 text-slate-300" />
-          <p className="text-sm">未检测到摄像头</p>
-          <button
-            onClick={enumerateDevices}
-            className="mt-2 text-indigo-600 text-sm font-medium hover:underline"
-          >
-            重新检测
-          </button>
-        </div>
-      )}
-
-      {devices.length > 0 && (
-        <div className="space-y-2">
-          {devices.map((device) => (
-            <button
-              key={device.deviceId}
-              onClick={() => handleDeviceChange(device.deviceId)}
-              disabled={disabled}
-              className={`w-full p-3 rounded-xl text-left transition-all flex items-center gap-3 ${
-                selectedDeviceId === device.deviceId
-                  ? 'bg-indigo-50 border-2 border-indigo-500'
-                  : 'bg-slate-50 border-2 border-transparent hover:border-indigo-200'
-              }`}
-            >
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                selectedDeviceId === device.deviceId
-                  ? 'bg-indigo-100'
-                  : 'bg-slate-200'
-              }`}>
-                <Video size={18} className={selectedDeviceId === device.deviceId ? 'text-indigo-600' : 'text-slate-500'} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className={`font-medium truncate ${
-                  selectedDeviceId === device.deviceId ? 'text-indigo-900' : 'text-slate-700'
-                }`}>
-                  {device.label}
-                </p>
-                <p className="text-xs text-slate-500">{device.deviceId.slice(0, 12)}...</p>
-              </div>
-              {selectedDeviceId === device.deviceId && (
-                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {permissionGranted && devices.length > 0 && selectedDeviceId && (
-        <p className="mt-4 text-xs text-green-600 flex items-center gap-1">
-          <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-          摄像头流已启动
-        </p>
-      )}
+      <select
+        value={selectedDeviceId || ''}
+        onChange={(e) => handleDeviceChange(e.target.value)}
+        disabled={disabled || loading || devices.length === 0}
+        className="appearance-none bg-slate-700/85 border border-slate-500/70 text-slate-100 text-sm font-medium rounded-xl pl-9 pr-16 py-2.5 backdrop-blur-sm shadow-inner shadow-black/20 hover:border-indigo-400/70 focus:outline-none focus:ring-2 focus:ring-indigo-500/80 focus:border-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed w-64 truncate transition-all"
+      >
+        {devices.length === 0 ? (
+          <option value="">{loading ? '加载中...' : '未检测到摄像头'}</option>
+        ) : (
+          devices.map((device) => (
+            <option key={device.deviceId} value={device.deviceId}>
+              {device.label}
+            </option>
+          ))
+        )}
+      </select>
+      <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+        <ChevronDown size={16} />
+      </div>
+      
+      <button
+        onClick={enumerateDevices}
+        disabled={loading || disabled}
+        className="absolute right-8 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-indigo-300 hover:bg-slate-600/60 rounded-lg transition-colors"
+        title="刷新设备列表"
+      >
+        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+      </button>
     </div>
   );
 };
