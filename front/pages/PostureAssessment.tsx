@@ -162,6 +162,9 @@ const PostureAssessment: React.FC = () => {
   const [currentStream, setCurrentStream] = useState<MediaStream | null>(null);
   const [detectionStatus, setDetectionStatus] = useState<'idle' | 'detecting' | 'detected' | 'captured'>('idle');
   const [guidanceText, setGuidanceText] = useState('');
+  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState('');
+  const [cameraLoading, setCameraLoading] = useState(false);
 
   // 拍照角度配置（带语音引导）
   const angles = [
@@ -366,10 +369,6 @@ const PostureAssessment: React.FC = () => {
           console.log('✅ assessPosture成功返回:', response);
           console.log('⏰ API完成时间:', new Date().toISOString());
           return response;
-        }).catch(apiError => {
-          console.error('❌ assessPosture失败:', apiError);
-          console.error('❌ 错误堆栈:', apiError.stack);
-          throw new Error(`API调用失败: ${apiError.message}`);
         }),
         new Promise((_, reject) => {
           console.log('⏱️ 设置超时定时器:', TIMEOUT_MS, 'ms');
@@ -422,18 +421,16 @@ const PostureAssessment: React.FC = () => {
 
       // 详细的错误信息
       let errorMessage = '体态检测失败';
-      let errorDetails = [];
+      let errorDetails: string[] = [];
 
-      if (err.message) {
-        // 客户端错误（如缺少照片）
-        errorMessage = '数据错误';
-        errorDetails.push(err.message);
-      } else if (err.message === '请求超时：分析时间超过60秒') {
+      const timeoutMessage = '请求超时：分析时间超过60秒';
+      if (err?.message === timeoutMessage) {
         errorMessage = '分析超时';
         errorDetails.push('服务器处理时间过长，可能是：', '• 照片文件过大', '• 同时有其他用户在进行检测', '• 服务器资源受限');
-      } else if (err.response) {
+      } else if (err?.response) {
         // HTTP错误响应
         const status = err.response.status;
+        const backendDetail = err.response.data?.detail;
         errorMessage = `服务器错误 (${status})`;
 
         if (status === 401) {
@@ -461,13 +458,30 @@ const PostureAssessment: React.FC = () => {
           errorDetails.push(`HTTP状态码: ${status}`);
         }
 
-        if (err.response.data?.detail && status !== 422) {
-          errorDetails.push(`详细错误: ${err.response.data.detail}`);
+        if (backendDetail && status !== 422) {
+          if (typeof backendDetail === 'string') {
+            errorDetails.push(`详细错误: ${backendDetail}`);
+          } else if (Array.isArray(backendDetail)) {
+            const detailText = backendDetail
+              .map((item: any) => {
+                if (typeof item === 'string') return item;
+                if (item?.msg) return item.msg;
+                return JSON.stringify(item);
+              })
+              .join('; ');
+            errorDetails.push(`详细错误: ${detailText}`);
+          } else {
+            errorDetails.push(`详细错误: ${JSON.stringify(backendDetail)}`);
+          }
         }
-      } else if (err.request) {
+      } else if (err?.request) {
         // 请求已发出但没有收到响应
         errorMessage = '网络连接错误';
         errorDetails.push('请检查：', '• 后端服务器是否正常运行', '• 网络连接是否正常', '• 端口是否正确');
+      } else if (err?.message) {
+        // 其他客户端错误
+        errorMessage = '数据错误';
+        errorDetails.push(err.message);
       } else {
         // 其他错误
         errorDetails.push(err.message || '未知错误');
@@ -501,19 +515,60 @@ const PostureAssessment: React.FC = () => {
     goToStep('guide');
   };
 
+  const loadCameraDevices = async () => {
+    try {
+      setCameraLoading(true);
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      setCameraDevices(videoDevices);
+      if (!selectedCameraId && videoDevices.length > 0) {
+        setSelectedCameraId(videoDevices[0].deviceId);
+      }
+    } catch (err: any) {
+      setError('读取摄像头列表失败: ' + err.message);
+    } finally {
+      setCameraLoading(false);
+    }
+  };
+
+  const createCameraStream = async (deviceId?: string) => {
+    const mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+      }
+    });
+    return mediaStream;
+  };
+
   // 启动自动拍照模式
   const startAutoCaptureMode = async () => {
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } }
-      });
+      const mediaStream = await createCameraStream(selectedCameraId || undefined);
       setCurrentStream(mediaStream);
       setAutoCaptureMode(true);
       setCurrentAngleIndex(0);
       goToStep('front'); // 开始第一个角度
+      await loadCameraDevices();
       startAngleGuidance(0);
     } catch (err: any) {
       setError('无法启动摄像头: ' + err.message);
+    }
+  };
+
+  const handleCameraChange = async (deviceId: string) => {
+    setSelectedCameraId(deviceId);
+    if (!autoCaptureMode) return;
+
+    try {
+      const newStream = await createCameraStream(deviceId);
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+      setCurrentStream(newStream);
+    } catch (err: any) {
+      setError('切换摄像头失败: ' + err.message);
     }
   };
 
@@ -575,45 +630,14 @@ const PostureAssessment: React.FC = () => {
     handlePhotoCapture(currentAngle.angle, file, preview);
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* 顶部导航 */}
-      <nav className="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-2">
-              <Activity className="w-8 h-8 text-indigo-600" />
-              <h1 className="text-xl font-bold text-slate-900">体态检测</h1>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => navigate('/dashboard')}
-                className="p-2 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                title="返回首页"
-              >
-                <Home size={20} />
-              </button>
-              <button
-                onClick={() => navigate('/posture/history')}
-                className="p-2 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                title="历史记录"
-              >
-                <History size={20} />
-              </button>
-              <button
-                onClick={() => navigate('/profile')}
-                className="p-2 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                title="个人中心"
-              >
-                <User size={20} />
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
+  useEffect(() => {
+    loadCameraDevices();
+  }, []);
 
+  return (
+    <div className="min-h-full bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* 主内容区域 */}
-      <main className="max-w-6xl mx-auto px-4 py-8">
+      <main className="max-w-6xl mx-auto px-4 py-0">
         {currentStep === 'guide' && (
           <GuideStep
             onStart={() => goToStep('front')}
@@ -643,9 +667,42 @@ const PostureAssessment: React.FC = () => {
 
         {/* 自动拍照模式 */}
         {autoCaptureMode && currentStep !== 'guidance' && currentStep !== 'analyzing' && currentStep !== 'result' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* 自动拍照引导 */}
-            <div className="lg:col-span-2">
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2 text-slate-700 text-sm font-medium">
+                  <Camera className="w-4 h-4 text-indigo-600" />
+                  自动拍照摄像头
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedCameraId}
+                    onChange={(e) => handleCameraChange(e.target.value)}
+                    disabled={cameraLoading || cameraDevices.length === 0}
+                    className="w-72 max-w-full px-3 py-2 rounded-xl border border-slate-300 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {cameraDevices.length === 0 ? (
+                      <option value="">{cameraLoading ? '加载摄像头中...' : '未检测到摄像头'}</option>
+                    ) : (
+                      cameraDevices.map((device, index) => (
+                        <option key={device.deviceId} value={device.deviceId}>
+                          {device.label || `摄像头 ${index + 1}`}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={loadCameraDevices}
+                    className="p-2 rounded-lg border border-slate-300 text-slate-600 hover:text-indigo-600 hover:border-indigo-300 transition-colors"
+                    title="刷新摄像头列表"
+                  >
+                    <RotateCw className={`w-4 h-4 ${cameraLoading ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+              </div>
+
+              {/* 自动拍照引导 */}
               <AutoCaptureGuide
                 stream={currentStream}
                 isActive={true}
@@ -656,51 +713,46 @@ const PostureAssessment: React.FC = () => {
               />
             </div>
 
-            {/* 控制面板 */}
-            <div className="space-y-4">
-              <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-6">
-                <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-                  <Camera className="w-5 h-5 text-indigo-600" />
-                  拍摄进度
-                </h3>
+            <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-5">
+              <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                <Camera className="w-5 h-5 text-indigo-600" />
+                拍摄进度
+              </h3>
 
-                {/* 进度步骤 */}
-                <div className="space-y-3">
-                  {angles.map((angle, index) => {
-                    const isCurrent = index === currentAngleIndex;
-                    const isCompleted = capturedPhotos[angle.angle];
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                {angles.map((angle, index) => {
+                  const isCurrent = index === currentAngleIndex;
+                  const isCompleted = capturedPhotos[angle.angle];
 
-                    return (
-                      <div
-                        key={angle.angle}
-                        className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
-                          isCurrent ? 'border-indigo-500 bg-indigo-50' :
-                          isCompleted ? 'border-green-500 bg-green-50' :
-                          'border-slate-200'
-                        }`}
-                      >
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
-                          isCompleted ? 'bg-green-500 text-white' :
-                          isCurrent ? 'bg-indigo-600 text-white' :
-                          'bg-slate-200 text-slate-600'
-                        }`}>
-                          {isCompleted ? <CheckCircle className="w-5 h-5" /> : index + 1}
-                        </div>
-                        <div className="flex-1">
-                          <div className="font-medium text-slate-900">{angle.label}</div>
-                          <div className="text-sm text-slate-600">{angle.description}</div>
-                        </div>
+                  return (
+                    <div
+                      key={angle.angle}
+                      className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
+                        isCurrent ? 'border-indigo-500 bg-indigo-50' :
+                        isCompleted ? 'border-green-500 bg-green-50' :
+                        'border-slate-200'
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                        isCompleted ? 'bg-green-500 text-white' :
+                        isCurrent ? 'bg-indigo-600 text-white' :
+                        'bg-slate-200 text-slate-600'
+                      }`}>
+                        {isCompleted ? <CheckCircle className="w-5 h-5" /> : index + 1}
                       </div>
-                    );
-                  })}
-                </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-slate-900 truncate">{angle.label}</div>
+                        <div className="text-sm text-slate-600 truncate">{angle.description}</div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
-              {/* 操作按钮 */}
-              <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-6">
+              <div className="mt-4 flex justify-end">
                 <button
                   onClick={stopAutoCaptureMode}
-                  className="w-full bg-red-500 hover:bg-red-600 text-white py-3 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
+                  className="bg-red-500 hover:bg-red-600 text-white px-6 py-2.5 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
                 >
                   <Home className="w-5 h-5" />
                   返回首页
@@ -1131,6 +1183,77 @@ const ResultStep: React.FC<{
   capturedPhotos: Record<string, PhotoCapture>;
   onRestart: () => void;
 }> = ({ result, capturedPhotos, onRestart }) => {
+  const metricCards = [
+    { key: 'body_balance', label: '身体平衡度', value: result.metrics.body_balance },
+    { key: 'spinal_alignment', label: '脊柱对齐度', value: result.metrics.spinal_alignment },
+    { key: 'shoulder_balance', label: '肩膀平衡度', value: result.metrics.shoulder_balance },
+    { key: 'hip_alignment', label: '髋部对齐度', value: result.metrics.hip_alignment },
+    { key: 'head_neck_angle', label: '头颈角度', value: result.metrics.head_neck_angle },
+    { key: 'spine_curvature_front', label: '正面脊柱弯曲', value: result.metrics.spine_curvature_front },
+    { key: 'spine_curvature_side', label: '侧面脊柱弯曲', value: result.metrics.spine_curvature_side },
+    { key: 'posture_stability', label: '体态稳定性', value: result.metrics.posture_stability },
+    { key: 'pelvis_tilt_angle', label: '骨盆倾斜角度', value: result.metrics.pelvis_tilt_angle },
+    { key: 'skeletal_symmetry', label: '骨骼对称性', value: result.metrics.skeletal_symmetry }
+  ];
+
+  const issues = result.detected_issues || [];
+  const activeIssues = issues.filter(issue => issue.severity !== 'none');
+  const severeCount = issues.filter(issue => issue.severity === 'severe').length;
+  const moderateCount = issues.filter(issue => issue.severity === 'moderate').length;
+  const mildCount = issues.filter(issue => issue.severity === 'mild').length;
+
+  const validMetrics = metricCards.filter(metric => metric.value !== null);
+  const strongestMetrics = [...validMetrics]
+    .sort((a, b) => (b.value || 0) - (a.value || 0))
+    .slice(0, 2);
+  const focusMetrics = [...validMetrics]
+    .sort((a, b) => (a.value || 0) - (b.value || 0))
+    .slice(0, 2);
+
+  const angleOrder: Array<{ angle: ViewAngle; label: string }> = [
+    { angle: ViewAngle.FRONT, label: '正面' },
+    { angle: ViewAngle.LEFT_SIDE, label: '左侧面' },
+    { angle: ViewAngle.RIGHT_SIDE, label: '右侧面' },
+    { angle: ViewAngle.BACK, label: '背面' }
+  ];
+
+  const photoPreviewList = angleOrder
+    .map(item => ({
+      ...item,
+      preview: capturedPhotos[item.angle]?.preview || ''
+    }))
+    .filter(item => item.preview);
+
+  const getMetricTagClass = (value: number | null): string => {
+    if (value === null) return 'bg-slate-100 text-slate-500';
+    if (value >= 80) return 'bg-green-100 text-green-700';
+    if (value >= 65) return 'bg-blue-100 text-blue-700';
+    if (value >= 50) return 'bg-amber-100 text-amber-700';
+    return 'bg-red-100 text-red-700';
+  };
+
+  const getMetricTagText = (value: number | null): string => {
+    if (value === null) return '暂无数据';
+    if (value >= 80) return '表现较好';
+    if (value >= 65) return '表现稳定';
+    if (value >= 50) return '需要关注';
+    return '重点改善';
+  };
+
+  const getSeverityText = (severity: string): string => {
+    if (severity === 'severe') return '严重';
+    if (severity === 'moderate') return '中等';
+    if (severity === 'mild') return '轻微';
+    return '无';
+  };
+
+  const getSeverityClass = (severity: string): string => {
+    if (severity === 'severe') return 'border-red-300 bg-red-50 text-red-800';
+    if (severity === 'moderate') return 'border-amber-300 bg-amber-50 text-amber-800';
+    if (severity === 'mild') return 'border-yellow-200 bg-yellow-50 text-yellow-800';
+    return 'border-slate-200 bg-slate-50 text-slate-700';
+  };
+
   return (
     <div className="space-y-6">
       {/* 评分卡片 */}
@@ -1147,63 +1270,158 @@ const ResultStep: React.FC<{
               <h2 className="text-2xl font-bold mb-1">{getEvaluationText(result.overall_score)}</h2>
               <p className="text-white/90">{result.overall_score}分 - {getGradeFromScore(result.overall_score)}</p>
             </div>
-            <div className="text-right">
-              <div className="text-6xl font-bold">{result.overall_score}</div>
-              <div className="text-sm text-white/80">综合体态评分</div>
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                <div className="text-6xl font-bold">{result.overall_score}</div>
+                <div className="text-sm text-white/80">综合体态评分</div>
+              </div>
+              <div
+                className="w-20 h-20 rounded-full p-1.5"
+                style={{
+                  background: `conic-gradient(rgba(255,255,255,0.95) ${Math.max(0, Math.min(100, result.overall_score)) * 3.6}deg, rgba(255,255,255,0.28) 0deg)`
+                }}
+              >
+                <div className="w-full h-full rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+                  <span className="text-xs font-semibold">等级{getGradeFromScore(result.overall_score)}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
         {/* 评分详情 */}
         <div className="p-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs text-slate-500">识别问题数</div>
+              <div className="text-2xl font-bold text-slate-900">{activeIssues.length}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs text-slate-500">高风险问题</div>
+              <div className="text-2xl font-bold text-red-600">{severeCount}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs text-slate-500">建议条目</div>
+              <div className="text-2xl font-bold text-indigo-600">{result.recommendations?.length || activeIssues.length}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs text-slate-500">拍摄视角</div>
+              <div className="text-2xl font-bold text-slate-900">{photoPreviewList.length}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            <div className="rounded-xl border border-slate-200 p-4 bg-slate-50">
+              <div className="flex items-center gap-2 mb-3">
+                <CheckCircle className="w-4 h-4 text-green-600" />
+                <h4 className="font-semibold text-slate-900">优势指标</h4>
+              </div>
+              <div className="space-y-2">
+                {strongestMetrics.length > 0 ? strongestMetrics.map(metric => (
+                  <div key={metric.key} className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">{metric.label}</span>
+                    <span className="font-semibold text-slate-900">{metric.value?.toFixed(1)}</span>
+                  </div>
+                )) : (
+                  <div className="text-sm text-slate-500">暂无可用指标</div>
+                )}
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-4 bg-slate-50">
+              <div className="flex items-center gap-2 mb-3">
+                <TrendingUp className="w-4 h-4 text-amber-600" />
+                <h4 className="font-semibold text-slate-900">优先改善</h4>
+              </div>
+              <div className="space-y-2">
+                {focusMetrics.length > 0 ? focusMetrics.map(metric => (
+                  <div key={metric.key} className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">{metric.label}</span>
+                    <span className="font-semibold text-amber-700">{metric.value?.toFixed(1)}</span>
+                  </div>
+                )) : (
+                  <div className="text-sm text-slate-500">暂无可用指标</div>
+                )}
+              </div>
+            </div>
+          </div>
+
           <h3 className="font-semibold text-slate-900 mb-4">体态指标</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 hover:border-indigo-300 transition-colors">
-              <div className="text-xs text-slate-600 mb-1">身体平衡度</div>
-              <div className="text-lg font-bold text-slate-900">{result.metrics.body_balance?.toFixed(1) || 'N/A'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 hover:border-indigo-300 transition-colors">
-              <div className="text-xs text-slate-600 mb-1">脊柱对齐度</div>
-              <div className="text-lg font-bold text-slate-900">{result.metrics.spinal_alignment?.toFixed(1) || 'N/A'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 hover:border-indigo-300 transition-colors">
-              <div className="text-xs text-slate-600 mb-1">肩膀平衡度</div>
-              <div className="text-lg font-bold text-slate-900">{result.metrics.shoulder_balance?.toFixed(1) || 'N/A'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 hover:border-indigo-300 transition-colors">
-              <div className="text-xs text-slate-600 mb-1">髋部对齐度</div>
-              <div className="text-lg font-bold text-slate-900">{result.metrics.hip_alignment?.toFixed(1) || 'N/A'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 hover:border-indigo-300 transition-colors">
-              <div className="text-xs text-slate-600 mb-1">头颈角度</div>
-              <div className="text-lg font-bold text-slate-900">{result.metrics.head_neck_angle?.toFixed(1) || 'N/A'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 hover:border-indigo-300 transition-colors">
-              <div className="text-xs text-slate-600 mb-1">正面脊柱弯曲</div>
-              <div className="text-lg font-bold text-slate-900">{result.metrics.spine_curvature_front?.toFixed(1) || 'N/A'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 hover:border-indigo-300 transition-colors">
-              <div className="text-xs text-slate-600 mb-1">侧面脊柱弯曲</div>
-              <div className="text-lg font-bold text-slate-900">{result.metrics.spine_curvature_side?.toFixed(1) || 'N/A'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 hover:border-indigo-300 transition-colors">
-              <div className="text-xs text-slate-600 mb-1">体态稳定性</div>
-              <div className="text-lg font-bold text-slate-900">{result.metrics.posture_stability?.toFixed(1) || 'N/A'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 hover:border-indigo-300 transition-colors">
-              <div className="text-xs text-slate-600 mb-1">骨盆倾斜角度</div>
-              <div className="text-lg font-bold text-slate-900">{result.metrics.pelvis_tilt_angle?.toFixed(1) || 'N/A'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 hover:border-indigo-300 transition-colors">
-              <div className="text-xs text-slate-600 mb-1">骨骼对称性</div>
-              <div className="text-lg font-bold text-slate-900">{result.metrics.skeletal_symmetry?.toFixed(1) || 'N/A'}</div>
-            </div>
+            {metricCards.map((metric) => (
+              <div key={metric.key} className="bg-slate-50 rounded-lg p-3 border border-slate-200 hover:border-indigo-300 transition-colors">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs text-slate-600">{metric.label}</div>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${getMetricTagClass(metric.value)}`}>
+                    {getMetricTagText(metric.value)}
+                  </span>
+                </div>
+                <div className="text-lg font-bold text-slate-900 mb-2">{metric.value?.toFixed(1) || 'N/A'}</div>
+                <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-indigo-500 to-purple-500"
+                    style={{ width: `${Math.max(0, Math.min(100, metric.value || 0))}%` }}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
+      {/* 拍摄回顾 */}
+      {photoPreviewList.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-200">
+            <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+              <Camera className="w-5 h-5 text-indigo-600" />
+              拍摄回顾
+            </h3>
+          </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {photoPreviewList.map((item) => (
+              <div key={item.angle} className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
+                <div className="aspect-video bg-slate-100">
+                  <img
+                    src={item.preview}
+                    alt={`${item.label}拍摄图`}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="px-3 py-2 text-sm font-medium text-slate-700">{item.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 无明显问题时的说明 */}
+      {activeIssues.length === 0 && (
+        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-200">
+            <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 text-green-600" />
+              当前状态说明
+            </h3>
+          </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="rounded-xl border border-green-200 bg-green-50 p-4">
+              <div className="text-sm font-semibold text-green-800 mb-1">保持习惯</div>
+              <p className="text-sm text-green-700">继续保持规律作息和日常拉伸，每天至少10分钟。</p>
+            </div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+              <div className="text-sm font-semibold text-blue-800 mb-1">周期复测</div>
+              <p className="text-sm text-blue-700">建议每 7-14 天复测一次，关注趋势而非单次结果。</p>
+            </div>
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+              <div className="text-sm font-semibold text-indigo-800 mb-1">训练建议</div>
+              <p className="text-sm text-indigo-700">维持核心与背部稳定训练，可进一步提升体态稳定性。</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 问题卡片 */}
-      {result.detected_issues && result.detected_issues.length > 0 && (
+      {issues.length > 0 && (
         <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-200">
             <h3 className="font-semibold text-slate-900 flex items-center gap-2">
@@ -1212,14 +1430,10 @@ const ResultStep: React.FC<{
             </h3>
           </div>
           <div className="p-6 space-y-3">
-            {result.detected_issues.map((issue) => (
+            {issues.map((issue) => (
               <div
                 key={issue.id}
-                className={`p-4 rounded-lg border-2 ${
-                  issue.severity === 'severe' ? 'border-red-300 bg-red-50' :
-                  issue.severity === 'moderate' ? 'border-amber-300 bg-amber-50' :
-                  'border-yellow-200 bg-yellow-50'
-                }`}
+                className={`p-4 rounded-lg border-2 ${getSeverityClass(issue.severity)}`}
               >
                 <div className="flex items-start justify-between">
                   <div>
@@ -1229,19 +1443,18 @@ const ResultStep: React.FC<{
                     </p>
                   </div>
                   <div className="text-right">
-                    <div className={`text-xs font-semibold px-2 py-1 rounded ${
-                      issue.severity === 'severe' ? 'bg-red-200 text-red-800' :
-                      issue.severity === 'moderate' ? 'bg-amber-200 text-amber-800' :
-                      'bg-yellow-200 text-yellow-800'
-                    }`}>
-                      {issue.severity === 'severe' ? '严重' :
-                       issue.severity === 'moderate' ? '中等' :
-                       issue.severity === 'mild' ? '轻微' : '无'}
+                    <div className="text-xs font-semibold px-2 py-1 rounded bg-white/70">
+                      {getSeverityText(issue.severity)}
                     </div>
                   </div>
                 </div>
               </div>
             ))}
+          </div>
+          <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 text-xs text-slate-600 flex items-center gap-4">
+            <span>严重: {severeCount}</span>
+            <span>中等: {moderateCount}</span>
+            <span>轻微: {mildCount}</span>
           </div>
         </div>
       )}
