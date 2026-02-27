@@ -49,7 +49,6 @@ const Dashboard: React.FC = () => {
     } else {
       hasAnyError = true;
       setRecentActions([]);
-      console.error('Dashboard actions load failed', actionsRes.reason);
     }
 
     if (historyRes.status === 'fulfilled') {
@@ -58,7 +57,6 @@ const Dashboard: React.FC = () => {
       hasAnyError = true;
       setHistory([]);
       setHistoryLoadError('评分趋势数据加载失败');
-      console.error('Dashboard score history load failed', historyRes.reason);
     }
 
     const actionCount =
@@ -220,13 +218,13 @@ const Dashboard: React.FC = () => {
 };
 
 const StatCard = ({ icon, label, value, bgColor }: { icon: React.ReactNode, label: string, value: number, bgColor: string }) => (
-  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-5">
-    <div className={`p-4 rounded-2xl ${bgColor}`}>
+  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-5 hover:shadow-lg hover:border-slate-200 transition-all duration-300 group">
+    <div className={`p-4 rounded-2xl ${bgColor} group-hover:scale-110 transition-transform duration-300`}>
       {icon}
     </div>
     <div>
       <p className="text-sm font-medium text-slate-500">{label}</p>
-      <p className="text-2xl font-bold text-slate-900">{value}</p>
+      <p className="text-3xl font-bold text-slate-900 tabular-nums">{value}</p>
     </div>
   </div>
 );

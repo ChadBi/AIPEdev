@@ -17,7 +17,8 @@ const VideoLibrary: React.FC = () => {
       const res = await api.get(endpoint);
       setVideos(res.data);
     } catch (err) {
-      console.error(err);
+      // 加载失败，静默处理
+      setVideos([]);
     } finally {
       setLoading(false);
     }
