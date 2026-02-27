@@ -184,7 +184,18 @@ def recognize_frame_base64(frame_base64: str) -> Dict[str, list[float]]:
     接收 base64 图片并识别关键点
     """
     frame = decode_base64_frame(frame_base64)
-    return recognize_frame(frame)
+    keypoints = recognize_frame(frame)
+
+    # 计算图片尺寸（从帧获取）
+    height, width = frame.shape[:2]
+
+    # 返回包含完整信息的字典（兼容性包装）
+    return {
+        'keypoints': keypoints,
+        'width': width,
+        'height': height,
+        'confidence': 0.9 if keypoints else 0.0
+    }
 
 
 def get_video_metadata(video_path: str) -> Dict:

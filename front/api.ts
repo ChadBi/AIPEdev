@@ -13,13 +13,38 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  console.log(`🚀 API请求: ${config.method?.toUpperCase()} ${config.url}`);
+  console.log('📋 请求头:', config.headers);
+  if (config.data instanceof FormData) {
+    console.log('📸 FormData包含的字段:');
+    config.data.forEach((value, key) => {
+      if (value instanceof File) {
+        console.log(`  - ${key}: File(${value.name}, ${value.size} bytes)`);
+      } else if (value instanceof Blob) {
+        console.log(`  - ${key}: Blob(${value.size} bytes)`);
+      } else {
+        console.log(`  - ${key}: ${value}`);
+      }
+    });
+  }
+
   return config;
 });
 
 // 响应拦截器：统一错误处理
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.log(`✅ API响应: ${response.config.method?.toUpperCase()} ${response.config.url}`);
+    console.log(`📊 状态码: ${response.status}`);
+    console.log(`📊 响应数据:`, response.data);
+    return response;
+  },
   (error) => {
+    console.error('❌ API错误:', error);
+    console.error('❌ 错误配置:', error.config);
+    console.error('❌ 错误响应:', error.response);
+
     // 401 未认证：清除 token 并跳转登录
     if (error.response?.status === 401) {
       localStorage.removeItem('access_token');

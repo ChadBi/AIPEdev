@@ -15,7 +15,8 @@ import {
   PlusCircle,
   BarChart3,
   Music,
-  Radio
+  Radio,
+  Activity
 } from 'lucide-react';
 
 const Layout: React.FC = () => {
@@ -29,6 +30,7 @@ const Layout: React.FC = () => {
     { name: '动作库', path: '/actions', icon: Library },
     { name: '视频管理', path: '/videos', icon: Video },
     { name: '音乐库', path: '/music', icon: Music },
+    { name: '体态检测', path: '/posture/assess', icon: Activity },
     { name: '开始评分', path: '/scores', icon: Target },
     { name: '实时检测', path: '/scores/live', icon: Radio },
     { name: '评分历史', path: '/scores/history', icon: History },
