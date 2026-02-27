@@ -11,35 +11,35 @@ export default defineConfig(({ mode }) => {
         proxy: {
           // 将 API 请求代理到后端，解决开发环境的跨域问题
           '/auth': {
-            target: 'http://localhost:8890',
+            target: 'http://localhost:8000',
             changeOrigin: true,
           },
           '/users': {
-            target: 'http://localhost:8890',
+            target: 'http://localhost:8000',
             changeOrigin: true,
           },
           '/actions': {
-            target: 'http://localhost:8890',
+            target: 'http://localhost:8000',
             changeOrigin: true,
           },
           '/videos': {
-            target: 'http://localhost:8890',
+            target: 'http://localhost:8000',
             changeOrigin: true,
           },
           '/music': {
-            target: 'http://localhost:8890',
+            target: 'http://localhost:8000',
             changeOrigin: true,
           },
           '/recognize': {
-            target: 'http://localhost:8890',
+            target: 'http://localhost:8000',
             changeOrigin: true,
           },
           '/scores': {
-            target: 'http://localhost:8890',
+            target: 'http://localhost:8000',
             changeOrigin: true,
           },
           '/sync': {
-            target: 'http://localhost:8890',
+            target: 'http://localhost:8000',
             changeOrigin: true,
           },
           '/ws': {
@@ -48,15 +48,15 @@ export default defineConfig(({ mode }) => {
             changeOrigin: true,
           },
           '/uploads': {
-            target: 'http://localhost:8890',
+            target: 'http://localhost:8000',
             changeOrigin: true,
           },
           '/health': {
-            target: 'http://localhost:8890',
+            target: 'http://localhost:8000',
             changeOrigin: true,
           },
           '/posture': {
-            target: 'http://localhost:8890',
+            target: 'http://localhost:8000',
             changeOrigin: true,
           },
         },

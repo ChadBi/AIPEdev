@@ -143,12 +143,18 @@ async def _handle_live_session(
                     await _send_error(channel, "frame 消息缺少 image_base64", "missing_frame_data")
                     continue
                 try:
-                    client_keypoints = recognize_frame_base64(frame_base64)
+                    result = recognize_frame_base64(frame_base64)
+                    # recognize_frame_base64 返回嵌套结构，需要提取实际的 keypoints
+                    client_keypoints = result.get("keypoints", result)
                 except Exception as exc:
                     logger.exception("单帧识别失败")
                     await _send_error(channel, str(exc), "frame_inference_failed")
                     continue
 
+            # 确保获取到的是关键点字典（兼容嵌套结构）
+            if isinstance(client_keypoints, dict):
+                if "keypoints" in client_keypoints:
+                    client_keypoints = client_keypoints["keypoints"]
             if not isinstance(client_keypoints, dict):
                 await _send_error(channel, "关键点数据格式错误", "invalid_keypoints")
                 continue

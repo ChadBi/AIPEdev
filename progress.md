@@ -896,7 +896,72 @@ else if (status === 422) {
 
 ---
 
-**最后一次更新**: 2026-02-25
+**最后一次更新**: 2026-02-27
+
+---
+
+## 2026-02-27 - 前端代理配置修复和启动问题修复
+
+### 问题诊断
+
+**用户反馈**：前端访问 `/auth/register` 时出现 `ECONNREFUSED` 代理错误。
+
+**根本原因分析**：
+1. **前端代理端口错误**：`front/vite.config.ts` 中大部分 API 代理指向 `8890` 端口，但后端实际运行在 `8000` 端口
+2. **后端启动代码缺陷**：`main.py` 缺少 `import asyncio`，导致后台批处理启动失败
+3. **数据库端口错误**：`config.yaml` 中数据库端口为 `3306`，实际应为 `3307`
+4. **配置变量缺失**：`core/config.py` 缺少 `SERVER_RELOAD` 和 `SERVER_LOG_LEVEL` 变量
+
+### 修复方案
+
+#### 1. 修复前端代理配置 (`front/vite.config.ts`)
+将所有 API 代理从 `8890` 改为 `8000`：
+- `/auth`、`/users`、`/actions`、`/videos`、`/music`、`/recognize`、`/scores`、`/sync`、`/uploads`、`/health`、`/posture` 全部改为 `http://localhost:8000`
+- `/ws` 保持 `ws://localhost:8000`
+
+#### 2. 修复后端启动代码 (`main.py`)
+- 添加 `import asyncio`（修复后台批处理启动失败）
+- 添加 `import uvicorn`（支持直接运行）
+- 添加启动入口 `if __name__ == "__main__":`
+
+#### 3. 修复数据库配置 (`config.yaml`)
+- 数据库端口从 `3306` 改为 `3307`
+
+#### 4. 补全配置变量 (`core/config.py`)
+- 添加 `SERVER_RELOAD` 变量
+- 添加 `SERVER_LOG_LEVEL` 变量
+
+### 修改的文件
+
+| 文件 | 操作 | 具体修改内容 |
+|------|------|------|
+| `front/vite.config.ts` | 修改 | 代理端口从 8890 改为 8000 |
+| `main.py` | 修改 | 添加 asyncio/uvicorn 导入，添加启动入口 |
+| `config.yaml` | 修改 | 数据库端口从 3306 改为 3307 |
+| `core/config.py` | 修改 | 添加 SERVER_RELOAD 和 SERVER_LOG_LEVEL 变量 |
+
+### 启动命令
+
+后端启动：
+```bash
+uv run python main.py
+```
+
+或使用 uvicorn：
+```bash
+uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+### 状态
+
+- ✅ 前端代理配置修复完成
+- ✅ 后端启动代码修复完成
+- ✅ 数据库端口修复完成
+- ✅ 配置变量补全完成
+- ⏳ 需要确保 MySQL 在 3307 端口运行
+- ⏳ 需要确保 `aipe_db` 数据库已创建
+
+---
 
 ---
 
@@ -1567,3 +1632,301 @@ useEffect(() => {
 
 #### 3. 执行完整的端到端测试
 ```bash
+
+---
+
+## 2026-02-27 - 实时检测移除音乐同步，改用视频原声
+
+### 需求
+用户反馈实时检测不需要音乐对齐功能，直接播放标准动作视频的原声即可。
+
+### 完成内容
+
+#### 1. 前端修改 (`front/pages/LiveScoring.tsx`)
+
+**移除音乐同步相关代码：**
+- 移除 `musicDelayTimerRef`、`pendingMusicDelayRef`、`musicDelayStartedAtRef`、`audioRef` 等不再使用的 ref
+- 移除 `clearMusicDelayTimer`、`stopAudio`、`playAudio`、`initAudio`、`startMusic` 等音频相关函数
+- 简化 `handleStart` 函数，移除音乐播放和同步偏移逻辑
+- 简化 `handleTogglePause` 函数，移除音频暂停/恢复逻辑
+- 简化 `stopSession` 函数，移除音频清理逻辑
+
+**标准视频播放原声：**
+- 移除 `LiveVideoPanel` 组件的 `muted` 属性，让标准动作视频播放原声
+- 两处 LiveVideoPanel（全屏模式和普通模式）都已修改
+
+**开始检测条件简化：**
+- 修改前：需要选择动作 + 音乐 + 摄像头就绪
+- 修改后：只需要选择动作 + 摄像头就绪
+
+**WebSocket 连接简化：**
+- `sync_offset_ms` 参数固定传 0，后端不再需要处理音乐同步偏移
+
+### 修改的文件
+
+| 文件 | 操作 | 具体修改内容 |
+|------|------|------|
+| `front/pages/LiveScoring.tsx` | 大幅简化 | 移除音乐同步逻辑、移除 muted 属性、简化开始条件 |
+
+### 潜在问题
+- 音乐选择面板仍保留在 UI 中，但已成为可选项（不影响开始检测）
+- 后端 `api/websocket.py` 中的 `sync_offset_ms` 参数保留，但前端固定传 0
+
+### 用户体验改进
+1. ✅ 不再强制选择音乐才能开始检测
+2. ✅ 标准动作视频播放原声，更直观
+3. ✅ 简化了代码逻辑，减少潜在 bug
+
+---
+
+**最后更新**: 2026-02-27
+
+---
+
+## 2026-02-27 - 实时检测页面简化（移除音乐选择）+ 模型配置修复
+
+### 需求
+1. 删除音乐选择面板，只保留一个音乐库链接入口
+2. 修复模型未启动的问题
+
+### 完成内容
+
+#### 1. 前端 UI 简化 (`front/pages/LiveScoring.tsx`)
+
+**移除音乐选择面板：**
+- 删除了"选择音乐"和"音乐控制/对齐信息"两个面板
+- 改为 2 列布局（摄像头选择 + 音乐库入口）
+- 音乐库面板只保留一个"管理音乐库"按钮链接到 `/music` 页面
+- 保留视频音量控制
+
+#### 2. 模型配置修复 (`config.yaml`)
+
+**问题根因：**
+- 配置文件中 `use_mock: true`，导致使用 Mock 模式返回随机数据
+- YOLO 模型实际未被调用
+
+**修复：**
+- 将 `use_mock` 从 `true` 改为 `false`
+- 现在 `recognize_frame_base64` 会调用真实的 YOLOv8 Pose 模型
+
+### 修改的文件
+
+| 文件 | 操作 | 具体修改内容 |
+|------|------|------|
+| `front/pages/LiveScoring.tsx` | UI 简化 | 移除音乐选择面板，改为音乐库入口 |
+| `config.yaml` | 配置修复 | `use_mock: true` → `use_mock: false` |
+
+### 重要提示
+修改配置后需要**重启后端服务**才能生效：
+```bash
+uv run python main.py
+```
+
+---
+
+**最后更新**: 2026-02-27
+
+
+## 2026-02-27 - 实时检测日志和声音问题修复
+
+### 需求
+1. 后端启动时日志不显示（看不到 YOLO 模型加载信息）
+2. 实时检测时标准动作视频没有声音
+3. 音量滑块不起作用
+
+### 完成内容
+
+#### 1. 后端日志配置修复 (`main.py`)
+
+**问题根因：**
+- Python 默认只输出 WARNING 级别及以上的日志
+- `logging.getLogger(__name__)` 没有配置 handler，INFO 级别的模型加载日志不会输出到控制台
+
+**修复：**
+```python
+# 配置日志输出到控制台
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+```
+
+现在启动后端时会看到：
+```
+2026-02-27 xx:xx:xx - main - INFO - 开始预加载 YOLO 模型...
+2026-02-27 xx:xx:xx - main - INFO - YOLO 模型预加载完成
+```
+
+#### 2. 标准视频声音修复 (`front/components/LiveVideoPanel.tsx`, `front/pages/LiveScoring.tsx`)
+
+**问题根因：**
+- `LiveVideoPanel` 组件的 `muted` 默认值是 `true`
+- 调用时没有传递 `muted={false}`，导致标准视频静音
+
+**修复：**
+- `LiveVideoPanel` 新增 `volume` 属性支持音量控制
+- `LiveScoring` 调用时传递 `muted={false}` 和 `volume={stats.music_volume}`
+
+#### 3. 音量控制修复
+
+**新增功能：**
+- `LiveVideoPanel` 组件增加 `useEffect` 监听 `volume` 属性变化
+- 实时更新 video 元素的 `volume` 属性
+
+### 修改的文件
+
+| 文件 | 操作 | 具体修改内容 |
+|------|------|------|
+| `main.py` | 修复 | 添加 `logging.basicConfig` 配置日志输出 |
+| `front/components/LiveVideoPanel.tsx` | 增强 | 新增 `volume` 属性和音量控制 useEffect |
+| `front/pages/LiveScoring.tsx` | 修复 | 标准视频传递 `muted={false}` 和 `volume={stats.music_volume}` |
+
+### 重启服务后预期效果
+1. ✅ 后端启动日志会显示模型加载信息
+2. ✅ 实时检测时标准动作视频播放原声
+3. ✅ 音量滑块可以调节视频音量
+
+---
+
+**最后更新**: 2026-02-27
+
+---
+
+## 2026-02-27 - 数据库清空重建
+
+### 需求
+用户需要清空数据库并重建所有表。
+
+### 完成内容
+
+#### 1. 创建数据库重建脚本 (`scripts/rebuild_database.py`)
+
+**脚本功能：**
+- 删除所有表（禁用外键检查避免顺序问题）
+- 根据 SQLAlchemy 模型重新创建所有表
+- 支持 `--force` 参数跳过交互确认
+
+#### 2. 执行数据库重建
+
+**重建结果（15张表）：**
+- `users` - 用户表
+- `actions` - 标准动作表
+- `videos` - 视频记录表
+- `score_records` - 评分记录表
+- `action_records` - 动作记录表
+- `music` - 音乐文件表
+- `sync_configs` - 同步配置表
+- `action_music_sync` - 动作音乐同步表
+- `posture_assessments` - 体态检测记录表
+- `posture_photos` - 多角度照片表
+- `posture_metrics` - 体态指标分析表
+- `posture_issues` - 体态问题规则库
+- `posture_assessment_issues` - 体态问题检测结果表
+- `posture_trends` - 用户体态历史趋势表
+- `posture_recommendations` - 体态改善建议库
+- `posture_exercise_library` - 体态改善运动库
+
+### 新增文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `scripts/rebuild_database.py` | 新建 | 数据库重建脚本 |
+
+### 使用方法
+
+```bash
+# 交互式执行（需要输入 yes 确认）
+uv run python scripts/rebuild_database.py
+
+# 强制执行（跳过确认）
+uv run python scripts/rebuild_database.py --force
+```
+
+### 潜在问题
+- 重建后所有用户数据丢失，需要重新注册用户
+- 需要重新上传标准动作视频和音乐文件
+
+---
+
+**最后更新**: 2026-02-27
+
+---
+
+## 2026-02-27 - 实时检测分数一直为0的Bug修复
+
+### 问题诊断
+
+**用户反馈**：实时检测没有分数，分数一直显示为0。
+
+### 根本原因分析
+
+**问题定位在 `api/websocket.py` 的 `_handle_live_session` 函数：**
+
+```python
+# 修改前
+result = recognize_frame_base64(frame_base64)
+client_keypoints = result  # 这里直接把嵌套字典当作关键点字典
+```
+
+**数据结构不匹配：**
+
+`recognize_frame_base64` 返回的是嵌套结构：
+```python
+{
+    'keypoints': {
+        'left_shoulder': [x, y, conf],
+        'right_shoulder': [x, y, conf],
+        ...
+    },
+    'width': 640,
+    'height': 480,
+    'confidence': 0.9
+}
+```
+
+但 `calculate_similarity` 函数期望的是直接的 keypoints 字典：
+```python
+def calculate_similarity(client_kp: dict, standard_kp: dict) -> float:
+    client_point = client_kp.get('left_shoulder')  # 找不到，返回 None
+    ...
+```
+
+**结果**：所有关键点查找都返回 `None`，`valid_points = 0`，导致分数总是 0。
+
+### 修复方案
+
+修改 `api/websocket.py` 中处理帧数据的逻辑，正确提取嵌套的 keypoints：
+
+```python
+# 修改后
+result = recognize_frame_base64(frame_base64)
+# recognize_frame_base64 返回嵌套结构，需要提取实际的 keypoints
+client_keypoints = result.get("keypoints", result)
+
+# 确保获取到的是关键点字典（兼容嵌套结构）
+if isinstance(client_keypoints, dict):
+    if "keypoints" in client_keypoints:
+        client_keypoints = client_keypoints["keypoints"]
+```
+
+### 修改的文件
+
+| 文件 | 操作 | 具体修改内容 |
+|------|------|------|
+| `api/websocket.py` | Bug修复 | 从嵌套结构中正确提取 keypoints 字典 |
+
+### 技术要点
+
+1. **API 返回值设计**：`recognize_frame_base64` 返回包含元数据的完整结果，而不仅仅是关键点
+2. **数据结构一致性**：评分函数 `calculate_similarity` 期望的是扁平的关键点字典
+3. **防御性编程**：添加兼容处理，支持嵌套和非嵌套两种格式
+
+### 状态
+
+- ✅ Bug已修复
+- ⏳ 需要重启后端服务验证
+
+---
+
+**最后更新**: 2026-02-27

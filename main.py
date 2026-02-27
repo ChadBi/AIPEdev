@@ -1,13 +1,26 @@
+import asyncio
+import os
+import logging
+import sys
+from contextlib import asynccontextmanager
+
+import uvicorn
+
+# 配置日志输出到控制台
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from api import auth, user, action, video, recognize, score, music, sync_config, action_music_sync, posture
 from api.websocket import router as ws_router
-from core.config import UPLOAD_DIR
-import os
-import logging
+from core.config import UPLOAD_DIR, SERVER_HOST, SERVER_PORT, SERVER_RELOAD, SERVER_LOG_LEVEL
 
-logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -90,3 +103,14 @@ app.include_router(posture.router, prefix="/posture", tags=["体态检测模块"
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "message": "AI 体育教学系统运行正常"}
+
+
+if __name__ == "__main__":
+    # 从配置文件读取服务器配置
+    uvicorn.run(
+        "main:app",
+        host=SERVER_HOST,
+        port=SERVER_PORT,
+        reload=SERVER_RELOAD,
+        log_level=SERVER_LOG_LEVEL,
+    )

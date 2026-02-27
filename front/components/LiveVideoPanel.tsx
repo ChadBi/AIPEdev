@@ -12,6 +12,7 @@ interface LiveVideoPanelProps {
   className?: string;
   muted?: boolean;
   loop?: boolean;
+  volume?: number; // 0.0 - 1.0
   videoRef?: React.MutableRefObject<HTMLVideoElement | null>;
   onTimeUpdate?: (event: React.SyntheticEvent<HTMLVideoElement>) => void;
 }
@@ -55,6 +56,7 @@ const LiveVideoPanel: React.FC<LiveVideoPanelProps> = ({
   className = '',
   muted = true,
   loop = false,
+  volume = 1.0,
   videoRef: externalVideoRef,
   onTimeUpdate,
 }) => {
@@ -548,6 +550,13 @@ const LiveVideoPanel: React.FC<LiveVideoPanelProps> = ({
       }
     });
   }, [keypoints, showSkeleton]);
+
+  // 控制视频音量
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.volume = volume;
+  }, [volume]);
 
   return (
     <div className={`relative bg-slate-900 rounded-2xl overflow-hidden ${className}`}>
