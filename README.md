@@ -1,129 +1,172 @@
-# AI 体育教学系统 (AIPE)
+# AIPE（AI 体育教学系统）
 
-基于 FastAPI + YOLOv8 Pose 的智能体育动作评估平台，提供视频姿态识别、关节角度评分和实时反馈功能。
+AIPE 是一个基于 `FastAPI + React + YOLOv8 Pose` 的体育动作评估平台，提供：
 
-## 核心特性
+- 标准动作库管理
+- 视频动作评分
+- 实时动作检测与结果分析
+- 体态检测（多角度拍照 + 问题识别 + 建议）
+- 历史记录与趋势查看
 
-- **智能评分** - 基于 8 个关键关节的加权评分系统
-- **实时识别** - YOLOv8-Pose 姿态检测，每秒 6 帧采样
-- **详细反馈** - 帧级别、关节级别的评分数据和可视化
-- **安全认证** - JWT + OAuth2 身份验证
-- **现代前端** - React 18 + TypeScript + Vite
+---
 
-## 快速开始
+## 1. 技术栈
+
+- 后端：`FastAPI`、`SQLAlchemy`、`MySQL`、`PyMySQL`
+- AI：`YOLOv8 Pose`、`OpenCV`
+- 前端：`React`、`TypeScript`、`Vite`、`Recharts`
+- 认证：`JWT`（OAuth2 Password Flow）
+
+---
+
+## 2. 项目目录（整理后）
+
+```text
+AIPEdev/
+├─ api/                     # 路由层（auth/video/score/posture/...）
+├─ core/                    # 配置、数据库连接、安全工具
+├─ crud/                    # 数据库访问封装
+├─ models/                  # SQLAlchemy 模型
+├─ schemas/                 # Pydantic 模型
+├─ services/                # 业务逻辑（识别、评分、体态分析）
+├─ migrations/              # 数据库迁移脚本
+├─ front/                   # 前端工程（React + TS）
+├─ docs/                    # 项目文档
+├─ tools/
+│  └─ dev_sandbox/          # 开发期测试/调试脚本与临时说明（已归档）
+├─ uploads/                 # 上传文件目录
+├─ config.yaml              # 全局配置（数据库、AI、服务端口等）
+├─ main.py                  # 后端入口
+├─ requirements.txt         # Python 依赖
+└─ progress.md              # 项目进度记录
+```
+
+> 说明：根目录中零散的测试/调试脚本已统一归档到 `tools/dev_sandbox/`。
+
+---
+
+## 3. 环境要求
+
+- Python `>= 3.10`
+- Node.js `>= 18`
+- MySQL `>= 8.0`（或兼容版本）
+- Windows / Linux / macOS
+
+---
+
+## 4. 快速启动（推荐用 uv）
+
+### 4.1 初始化 Python 环境
 
 ```bash
-# 1. 安装 Python 依赖 (Python >= 3.10)
-pip install -r requirements.txt
-
-# 2. 安装前端依赖
-cd front && npm install
-
-# 3. 配置数据库 (编辑 config.yaml)
-
-# 4. 初始化数据库
-python init_db.py
-
-# （开发调试）重置数据库并重建表结构
-.venv/Scripts/python.exe tools/reset_dev_db.py --yes
-
-# 5. 启动服务
-uvicorn main:app --reload     # 后端 (8000)
-cd front && npm run dev       # 前端 (3000)
+# 在项目根目录执行
+uv venv
+uv sync
 ```
 
-## 访问地址
+可选检查（确认是项目虚拟环境）：
 
-| 服务 | 地址 |
-|------|------|
-| 前端 | http://localhost:3000 |
-| API 文档 | http://localhost:8000/docs |
-| 健康检查 | http://localhost:8000/health |
-
-## 项目结构
-
-```
-AIPEdev/
-├── api/              # API 路由层
-│   ├── auth.py       # 认证接口
-│   ├── action.py     # 动作库
-│   ├── video.py      # 视频管理
-│   ├── score.py      # 评分接口
-│   └── recognize.py  # 识别接口
-├── core/             # 核心配置
-│   ├── config.py     # 配置加载
-│   ├── database.py   # 数据库
-│   └── security.py   # 安全工具
-├── crud/             # 数据访问层
-├── models/           # ORM 模型
-├── schemas/          # Pydantic 模式
-├── services/         # 业务逻辑
-│   ├── recognition_service.py  # YOLOv8 识别
-│   └── score_service.py        # 评分算法
-├── utils/            # 工具函数
-├── docs/             # 详细文档
-├── front/            # React 前端
-│   ├── pages/        # 页面组件
-│   └── components/   # 通用组件
-├── config.yaml       # 配置文件
-├── main.py           # 应用入口
-└── requirements.txt  # Python 依赖
+```bash
+uv run python -c "import sys; print(sys.prefix)"
 ```
 
-## API 概览
+### 4.2 配置后端
 
-### 认证模块 `/auth`
-- `POST /auth/register` - 用户注册
-- `POST /auth/login` - OAuth2 登录
+编辑 [config.yaml](config.yaml)：
 
-### 用户模块 `/users`
-- `GET /users/me` - 获取当前用户
+- `database.url`：数据库连接串
+- `ai.yolo_model_path`：模型文件路径（默认 `yolov8n-pose.pt`）
+- `server.host/server.port`：后端监听地址
 
-### 动作库 `/actions`
-- `POST /actions/create-from-video` - 从视频创建标准动作
-- `GET /actions/` - 获取动作列表
-- `GET /actions/count` - 获取动作总数
+### 4.3 初始化数据库
 
-### 视频管理 `/videos`
-- `POST /videos/upload` - 上传视频
-- `GET /videos/me` - 获取我的视频
-- `GET /videos/me/count` - 获取我的视频总数
+```bash
+uv run python init_db.py
+```
 
-### 评分系统 `/scores`
-- `POST /scores/` - 执行动作评分
-- `GET /scores/history` - 查看评分历史
-- `GET /scores/history/count` - 获取评分历史总数
+如果有新增迁移脚本，按需执行（示例）：
 
-## 文档
+```bash
+uv run python migrations/004_fix_posture_issue_weight_score_range.py
+```
 
-更多内容请查看 [docs/](docs/) 目录：
+### 4.4 启动后端
 
-| 文档 | 说明 |
-|------|------|
-| [COMPLETE_DOCUMENTATION.md](docs/COMPLETE_DOCUMENTATION.md) | **完整项目文档** - 项目概述、架构设计、API 详解、开发指南 |
-| [AI_ASSISTANT_GUIDE.md](docs/AI_ASSISTANT_GUIDE.md) | **AI 助手快速参考** - 为 AI 助手准备的速度查表 |
-| [DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) | **开发日志** - 功能开发记录、Bug 修复、版本历史 |
-| API.md | 详细 API 接口文档 |
-| DEPLOYMENT.md | 部署指南 |
-| PROJECT_SUMMARY.md | 项目总结 |
-| QUICK_REFERENCE.md | 快速参考 |
+```bash
+uv run python main.py
+```
 
-### 推荐阅读顺序
+### 4.5 启动前端
 
-1. **新上手**: 先读 [AI_ASSISTANT_GUIDE.md](docs/AI_ASSISTANT_GUIDE.md) 的"一分钟了解项目"
-2. **开发功能**: 查看 [COMPLETE_DOCUMENTATION.md](docs/COMPLETE_DOCUMENTATION.md) 的"开发指南"章节
-3. **排查问题**: 参考 [COMPLETE_DOCUMENTATION.md](docs/COMPLETE_DOCUMENTATION.md) 的"故障排查"章节
-4. **了解历史**: 阅读 [DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) 了解功能演进
+```bash
+cd front
+npm install
+npm run dev
+```
 
-## 技术栈
+---
 
-| 层级 | 技术 |
-|------|------|
-| 后端 | FastAPI + SQLAlchemy + MySQL |
-| AI | YOLOv8 Pose + OpenCV |
-| 前端 | React + TypeScript + Vite |
-| 认证 | JWT + OAuth2 |
+## 5. 访问地址
 
-## License
+- 前端：`http://localhost:5173`（Vite 默认）
+- 后端 API：`http://127.0.0.1:8000`
+- Swagger 文档：`http://127.0.0.1:8000/docs`
+- 健康检查：`http://127.0.0.1:8000/health`
+
+---
+
+## 6. 核心接口分组
+
+- `/auth`：登录、注册
+- `/users`：用户信息
+- `/actions`：动作库管理
+- `/videos`：视频上传与管理
+- `/scores`：普通评分、实时评分结果
+- `/ws`：实时检测 WebSocket
+- `/posture`：体态检测、报告、趋势、问题规则
+- `/music`、`/sync`：音乐与动作同步
+
+---
+
+## 7. 开发调试说明
+
+### 7.1 调试脚本归档位置
+
+以下类型脚本统一放在 `tools/dev_sandbox/`：
+
+- `debug_*.py`
+- `test_*.py`
+- `check_*.py`
+- 临时排错文档与 SQL
+
+### 7.2 常用命令
+
+```bash
+# 后端静态检查（示例）
+uv run python -m py_compile main.py
+
+# 前端构建
+cd front && npm run build
+```
+
+---
+
+## 8. 常见问题
+
+### Q1：体态检测报 500 怎么看具体原因？
+
+前端已支持显示后端 `detail`，请在体态检测页面查看错误面板中的“详细错误”。
+
+### Q2：`weight_score` 越界报错（1264）怎么办？
+
+执行迁移：
+
+```bash
+uv run python migrations/004_fix_posture_issue_weight_score_range.py
+```
+
+---
+
+## 9. 许可证
 
 MIT
