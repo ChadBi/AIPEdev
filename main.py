@@ -1,11 +1,15 @@
+import asyncio
+import logging
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
 from api import auth, user, action, video, recognize, score, music, sync_config, action_music_sync, posture
 from api.websocket import router as ws_router
 from core.config import UPLOAD_DIR
-import os
-import logging
 
 logger = logging.getLogger(__name__)
 
