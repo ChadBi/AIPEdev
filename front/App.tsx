@@ -23,6 +23,7 @@ import VideoLibrary from './pages/VideoLibrary';
 import VideoUpload from './pages/VideoUpload';
 import ScoringPage from './pages/Scoring';
 import ScoreResult from './pages/ScoreResult';
+import LiveScoreResult from './pages/LiveScoreResult';
 import ScoreHistory from './pages/ScoreHistory';
 import UserProfile from './pages/UserProfile';
 import MusicLibrary from './pages/MusicLibrary';
@@ -118,7 +119,10 @@ const AppContent: React.FC = () => {
             <Route path="/scores/result/:id" element={<ScoreResult />} />
             <Route path="/scores/history" element={<ScoreHistory />} />
             <Route path="/scores/live" element={<LiveScoring />} />
+            <Route path="/scores/live/result" element={<LiveScoreResult />} />
+            <Route path="/scores/live/result/:id" element={<LiveScoreResult />} />
             <Route path="/music" element={<MusicLibrary />} />
+            <Route path="/sync-align" element={<SyncAlign />} />
             <Route path="/sync/align" element={<SyncAlign />} />
             <Route path="/posture/assess" element={<PostureAssessment />} />
             <Route path="/posture/history" element={<PostureHistory />} />

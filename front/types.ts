@@ -66,6 +66,7 @@ export interface ScoreHistoryItem {
     [key: string]: number;
   };
   feedback: string[];
+  is_live: boolean;
   created_at: string;
 }
 
@@ -243,6 +244,49 @@ export interface LiveActionConfig {
   music_id: number | null;
   sync_offset_ms: number;
   is_aligned: boolean;
+}
+
+export interface LiveResultFrame {
+  timestamp: number;
+  score: number;
+}
+
+export interface LiveResultData {
+  score_id?: number;
+  action_id: number;
+  action_name: string;
+  music_id: number | null;
+  music_name: string | null;
+  started_at: string;
+  ended_at: string;
+  duration_seconds: number;
+  total_score: number;
+  current_score: number;
+  average_score: number;
+  frames_processed: number;
+  display_fps: number;
+  latency_ms: number;
+  frame_scores: LiveResultFrame[];
+}
+
+export interface LiveScoreSavePayload {
+  action_id: number;
+  music_id: number | null;
+  music_name: string | null;
+  started_at: string;
+  ended_at: string;
+  duration_seconds: number;
+  total_score: number;
+  current_score: number;
+  average_score: number;
+  frames_processed: number;
+  display_fps: number;
+  latency_ms: number;
+  frame_scores: Array<{
+    frame_index: number;
+    score: number;
+    timestamp: number;
+  }>;
 }
 
 export interface LiveWsScorePayload {

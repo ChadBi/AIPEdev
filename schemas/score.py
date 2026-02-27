@@ -35,8 +35,51 @@ class ScoreHistoryItem(BaseModel):
     total_score: float
     joint_scores: Dict[str, float]
     feedback: List[str]
+    is_live: bool = False
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class LiveScoreSaveIn(BaseModel):
+    """实时评分结果入库请求"""
+    action_id: int
+    music_id: int | None = None
+    music_name: str | None = None
+    started_at: datetime
+    ended_at: datetime
+    duration_seconds: float
+    total_score: float
+    current_score: float
+    average_score: float
+    frames_processed: int
+    display_fps: int
+    latency_ms: int
+    frame_scores: List[FrameScore] = []
+
+
+class LiveScoreSaveOut(BaseModel):
+    """实时评分结果入库响应"""
+    score_id: int
+
+
+class LiveScoreDetailOut(BaseModel):
+    """实时评分详情响应"""
+    score_id: int
+    action_id: int
+    action_name: str
+    music_id: int | None = None
+    music_name: str | None = None
+    started_at: datetime
+    ended_at: datetime
+    duration_seconds: float
+    total_score: float
+    current_score: float
+    average_score: float
+    frames_processed: int
+    display_fps: int
+    latency_ms: int
+    frame_scores: List[FrameScore] = []
+    created_at: datetime
 

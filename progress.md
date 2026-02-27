@@ -1,5 +1,104 @@
 # AIPE 项目开发进度记录
 
+## 2026-02-23 - 实时检测结果入库并接入历史页
+
+### 需求
+- 将实时检测结果持久化到数据库。
+- 在评分历史页展示实时记录，并可进入实时结果详情。
+
+### 完成内容
+- 数据库扩展：`score_records` 新增 `is_live` 与 `live_metadata` 字段。
+- 后端新增接口：
+  - `POST /scores/live`：保存实时检测结果。
+  - `GET /scores/live/{score_id}`：获取实时检测结果详情。
+- 历史接口扩展：`GET /scores/history` 增加 `is_live` 字段。
+- 前端接入：实时检测停止时自动调用保存接口，成功后跳转 `/scores/live/result/:id`。
+- 实时结果页支持按 `:id` 拉取详情，解决刷新丢失问题。
+- 历史页新增“来源”列（实时/普通），并根据来源跳转对应详情页。
+- 已执行迁移脚本：`migrations/003_add_live_fields_to_score_records.py`。
+
+### 修改文件
+- `models/score.py`
+- `crud/score.py`
+- `schemas/score.py`
+- `api/score.py`
+- `migrations/003_add_live_fields_to_score_records.py`
+- `front/types.ts`
+- `front/pages/LiveScoring.tsx`
+- `front/pages/LiveScoreResult.tsx`
+- `front/pages/ScoreHistory.tsx`
+- `front/App.tsx`
+- `progress.md`
+
+### 潜在问题
+- 实时记录目前未保存摄像头设备信息，如后续需要质量追踪可加到 `live_metadata`。
+
+## 2026-02-23 - 新增实时检测结果页
+
+### 需求
+- 实时检测结束后进入专门结果页，展示本次评分结果。
+- 结果页视觉风格参考非实时评分结果页。
+
+### 完成内容
+- 在实时检测页增加会话结果采集：记录开始时间、逐帧分数序列、结束时统计快照。
+- 点击“停止”后自动跳转到实时结果页，并通过路由 state 传递本次结果数据。
+- 新增实时结果页，展示：总评等级、平均分、峰值分、检测时长、处理帧、FPS、延迟、分数曲线。
+- 新增路由 `/scores/live/result` 并接入应用。
+
+### 修改文件
+- `front/pages/LiveScoring.tsx`
+- `front/pages/LiveScoreResult.tsx`
+- `front/App.tsx`
+- `front/types.ts`
+- `progress.md`
+
+### 潜在问题
+- 当前实时结果采用前端会话内数据（未落库），刷新结果页会丢失本次结果。
+- 若需要历史可追溯，后续可增加后端持久化接口。
+
+## 2026-02-23 - 修复实时检测顶部统计卡宽度抖动
+
+### 问题
+- 实时检测开始后，顶部统计栏（当前分数、FPS、平均分、帧数、延迟、音乐状态、音量）会随数字长度变化出现宽度抖动。
+
+### 根因
+- 顶部统计卡采用内容自适应宽度（`px-*`），数值位数变化时会触发布局重新计算，导致视觉抖动。
+
+### 完成内容
+- 为全屏顶部统计卡设置固定宽度（`w-*`）并加 `shrink-0`，避免被压缩。
+- 将分数与各数值字段增加 `tabular-nums`，确保数字切换时字形宽度稳定。
+- 音乐状态和音量区域同步固定宽度，保持整排布局稳定。
+
+### 修改文件
+- `front/pages/LiveScoring.tsx`
+- `progress.md`
+
+### 潜在问题
+- 固定宽度在极小屏幕下可能导致横向空间紧张，若后续增加更多指标，建议改为可横向滚动或分组折叠。
+
+## 2026-02-23 - 修复 actions 表缺少 recognition_status 字段
+
+### 问题
+- 后端请求 `/actions` 与 `/actions/create-from-video` 时出现 MySQL 1054 错误：`Unknown column 'actions.recognition_status' in 'field list'`。
+
+### 根因
+- `models/action.py` 已定义 `recognition_status`、`recognition_error` 字段。
+- 数据库 `actions` 表未执行对应迁移，导致 ORM 查询字段与实际表结构不一致。
+- `migrations/002_add_recognition_status.py` 中使用了固定库名 `aipe_db`，在非该库名环境下存在兼容风险。
+
+### 完成内容
+- 执行迁移脚本：`migrations/002_add_recognition_status.py`，成功补齐缺失列。
+- 修复迁移脚本：将 `TABLE_SCHEMA = 'aipe_db'` 改为动态读取 `SELECT DATABASE()`，避免环境耦合。
+- 复跑迁移脚本验证幂等：已识别字段存在并安全跳过。
+- 启动服务并请求 `GET /actions/?skip=0&limit=1`，返回 200，确认问题解决。
+
+### 修改文件
+- `migrations/002_add_recognition_status.py`
+- `progress.md`
+
+### 潜在问题
+- 其他历史迁移脚本若仍有固定库名，后续在多环境部署时可能复现类似问题，建议统一排查。
+
 ## 2026-02-21 - 完整文档创建
 
 ### 任务概述
@@ -1468,145 +1567,3 @@ useEffect(() => {
 
 #### 3. 执行完整的端到端测试
 ```bash
-============================================================
-  开始端到端测试
-============================================================
-
-1. 健康检查测试
-✅ 服务器状态: healthy
-✅ 消息: AI 体育教学系统运行正常
-
-2. 体态分析API测试（直接调用）
-✅ 体态服务测试通过: 体态检测服务运行正常
-⚠️  需要认证（这是正常的）
-
-============================================================
-  算法集成状态
-============================================================
-
-📊 算法方法集成检查:
-  ✅ calculate_body_balance
-  ✅ calculate_shoulder_balance
-  ✅ calculate_hip_alignment
-  ✅ calculate_spinal_alignment
-  ✅ calculate_head_neck_angle
-  ✅ calculate_spine_curvature_front
-  ✅ calculate_spine_curvature_side
-  ✅ calculate_posture_stability
-  ✅ calculate_pelvis_tilt_angle
-  ✅ _calculate_skeletal_symmetry
-
-✅ 集成状态: 10/10 个算法方法已集成
-
-📊 配置常量检查:
-  ✅ SCORE_THRESHOLDS
-  ✅ IDEAL_NECK_VECTOR
-  ✅ IDEAL_SPINE_VECTOR
-```
-
-### 测试结果分析
-- ✅ **服务健康检查**: 通过
-- ✅ **体态服务**: 运行正常
-- ✅ **算法集成**: 10/10 个方法全部集成
-- ✅ **配置常量**: 3/3 个全部存在
-- ⚠️  **API认证**: 需要认证（符合预期）
-- ⚠️  **图片上传**: 需要提供4张测试图片
-
-### 修改/新增的文件
-- `test_end2end_posture.py` - 新增端到端测试脚本
-- `posture_analysis_service.py` - 验证算法集成无误
-
-### 技术亮点
-1. **异步测试框架**: 使用httpx异步客户端，提高测试效率
-2. **自动发现机制**: 自动查找测试图片和验证算法集成
-3. **编码兼容性**: 解决Windows控制台emoji显示问题
-4. **全面验证**: 从服务健康到算法集成的多层次验证
-
-### 核心成就
-✅ **成功完成端到端测试**
-✅ **验证所有算法改进已正确集成到系统中**
-✅ **确认服务器运行状态良好**
-✅ **为后续的用户测试做好准备**
-
-**状态**: **端到端测试成功，所有改进已验证！**
-
----
-
-## 服务器重启和真实API测试完成 (2026-02-26)
-
-### 任务概述
-重启服务器加载最新算法代码，并进行真实的API端到端测试，验证所有改进在真实运行环境中正常工作。
-
-### 完成的工作
-
-#### 1. 服务器进程管理
-- 停止旧的8890端口服务器（PID: 696156）
-- 重新启动服务器加载最新算法代码
-- 等待服务器完全启动进行健康检查
-
-#### 2. 真实API端到端测试
-创建完整的测试流程包括：
-- 自动生成测试图片（火柴人图案）
-- 上传4张角度照片到`/posture/assess`API
-- 验证所有新增指标的计算结果
-- 检查API数据验证限制
-
-#### 3. 测试结果分析
-```
-=== API测试结果 ===
-Status Code: 200 ✅
-Overall Score: 20
-Assessment ID: 86
-
-=== Metrics ===
-body_balance: 60.0 ✅
-spinal_alignment: 60.0 ✅
-head_neck_angle: 60.0 ✅
-shoulder_balance: 0.0 ⚠️ (测试图片对称位置相同)
-hip_alignment: 0.0 ⚠️ (测试图片对称位置相同)
-posture_stability: 65.0 ✅
-spine_curvature_front: 75.0 ✅
-spine_curvature_side: 75.0 ✅
-pelvis_tilt_angle: -10.64 ✅ (问题已修复！)
-skeletal_symmetry: NULL ❌ (需要更明显关键点)
-
-=== Summary ===
-Valid Metrics: 9/10 (90%成功率)
-```
-
-### 主要突破
-
-#### 🎯 核心问题修复
-**骨盆倾斜角度问题解决**：
-- **修复前**：pelvis_tilt_angle = 65度超出API验证限制（±45度）
-- **修复后**：pelvis_tilt_angle = -10.64度，完全符合医学标准
-- **修复方法**：服务器重启加载最新算法代码，正确的角度限制逻辑生效
-
-#### 📈 算法改进验证
-新增的7个体态指标中有4个（57%）完全正常工作：
-- 体态稳定性：65分（优秀）
-- 正面脊柱弯曲度：75分（优秀）
-- 侧面脊柱弯曲度：75分（优秀）
-- 骨盆倾斜角度：-10.64度（正常范围）
-
-### 技术发现
-1. **代码缓存问题**：算法改进后必须重启服务器才能生效
-2. **测试图片限制**：简单火柴人图片限制了某些指标的准确性
-3. **API验证严格**：数据类型限制确保了医学标准的准确性
-4. **真实环境差异**：单元测试100%通过vs真实环境90%成功率，体现了实际应用的复杂性
-
-### 修改/涉及的文件
-- `services/posture_analysis_service.py` - 核心算法改进
-- `restart_and_test.py` - 真实API测试脚本
-- `progress.md` - 额外添加此条目记录
-
-### 核心成就
-✅ **成功重启服务器并加载最新代码**
-✅ **修复了骨盆倾斜角度超出范围的问题**
-✅ **真实API测试90%成功率**
-✅ **验证所有算法改进在生产环境中正常工作**
-✅ **完成了完整的算法改进任务闭环**
-
-**状态**: **最终端到端测试成功！体态分析算法改进任务圆满完成！**
-
----

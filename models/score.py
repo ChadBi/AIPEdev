@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Float, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, Float, DateTime, ForeignKey, JSON, Boolean
 from sqlalchemy.sql import func
 from core.database import Base
 
@@ -38,5 +38,23 @@ class ScoreRecord(Base):
     # AI 建议反馈 (JSON List)
     # 格式: ["左膝弯曲幅度不足", "动作节奏良好"]
     feedback = Column(JSON, nullable=False)
+
+    # 是否为实时检测结果
+    is_live = Column(Boolean, default=False, nullable=False)
+
+    # 实时检测附加元数据
+    # 格式: {
+    #   "music_id": 1,
+    #   "music_name": "示例音乐",
+    #   "started_at": "2026-02-23T10:00:00Z",
+    #   "ended_at": "2026-02-23T10:00:30Z",
+    #   "duration_seconds": 30.0,
+    #   "current_score": 88.0,
+    #   "average_score": 85.5,
+    #   "frames_processed": 120,
+    #   "display_fps": 12,
+    #   "latency_ms": 16
+    # }
+    live_metadata = Column(JSON, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

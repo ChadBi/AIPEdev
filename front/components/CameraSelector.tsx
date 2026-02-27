@@ -7,6 +7,7 @@ interface CameraSelectorProps {
   selectedDeviceId: string | null;
   onStreamReady?: (stream: MediaStream | null) => void;
   disabled?: boolean;
+  preserveStreamOnUnmount?: boolean; // 布局切换时是否保持流
 }
 
 const CameraSelector: React.FC<CameraSelectorProps> = ({
@@ -14,6 +15,7 @@ const CameraSelector: React.FC<CameraSelectorProps> = ({
   selectedDeviceId,
   onStreamReady,
   disabled = false,
+  preserveStreamOnUnmount = false,
 }) => {
   const [devices, setDevices] = useState<CameraDevice[]>([]);
   const [loading, setLoading] = useState(false);
@@ -82,13 +84,18 @@ const CameraSelector: React.FC<CameraSelectorProps> = ({
   // 处理设备选择
   const handleDeviceChange = (deviceId: string) => {
     if (disabled) return;
+    // 如果选中的设备没有变化，不做任何事情
+    if (selectedDeviceId === deviceId) return;
     onDeviceChange(deviceId);
   };
 
   // 停止视频流（用于组件卸载或设备切换）
-  const stopStream = useCallback(() => {
+  const stopStream = useCallback((skipStreamStop: boolean = false) => {
     if (currentStreamRef.current) {
-      currentStreamRef.current.getTracks().forEach(track => track.stop());
+      // 如果 skipStreamStop 为 true，不停止轨道（用于布局切换时保持流）
+      if (!skipStreamStop) {
+        currentStreamRef.current.getTracks().forEach(track => track.stop());
+      }
       currentStreamRef.current = null;
       lastStartedDeviceIdRef.current = null;
       onStreamReadyRef.current?.(null);
@@ -102,10 +109,19 @@ const CameraSelector: React.FC<CameraSelectorProps> = ({
       currentStreamRef.current &&
       currentStreamRef.current.getVideoTracks().some(track => track.readyState === 'live')
     ) {
+      // 流已经在运行，直接返回
       return currentStreamRef.current;
     }
 
-    stopStream();
+    // 如果需要保持流且流存在，不要停止它
+    if (preserveStreamOnUnmount && currentStreamRef.current) {
+      setError('');
+      setPermissionGranted(true);
+      onStreamReadyRef.current?.(currentStreamRef.current);
+      return currentStreamRef.current;
+    }
+
+    stopStream(false);
     setError('');
 
     try {
@@ -136,7 +152,7 @@ const CameraSelector: React.FC<CameraSelectorProps> = ({
       onStreamReadyRef.current?.(null);
       return null;
     }
-  }, [stopStream]);
+  }, [stopStream, preserveStreamOnUnmount]);
 
   // 当选中设备变化时，自动启动新流
   useEffect(() => {
@@ -147,9 +163,9 @@ const CameraSelector: React.FC<CameraSelectorProps> = ({
   // 清理
   useEffect(() => {
     return () => {
-      stopStream();
+      stopStream(preserveStreamOnUnmount);
     };
-  }, [stopStream]);
+  }, [stopStream, preserveStreamOnUnmount]);
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
