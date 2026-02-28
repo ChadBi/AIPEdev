@@ -1,25 +1,15 @@
 import asyncio
-import os
 import logging
-import sys
+import os
 from contextlib import asynccontextmanager
-
-import uvicorn
-
-# 配置日志输出到控制台
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
 from api import auth, user, action, video, recognize, score, music, sync_config, action_music_sync, posture
 from api.websocket import router as ws_router
-from core.config import UPLOAD_DIR, SERVER_HOST, SERVER_PORT, SERVER_RELOAD, SERVER_LOG_LEVEL
+from core.config import UPLOAD_DIR
 
 
 @asynccontextmanager
