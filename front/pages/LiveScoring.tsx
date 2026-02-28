@@ -28,6 +28,7 @@ import {
   ArrowLeft,
   Music2,
   Settings,
+  Camera,
 } from 'lucide-react';
 
 type LiveStage = 'select' | 'detect';
@@ -104,18 +105,6 @@ const LiveScoring: React.FC = () => {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
 
-  useEffect(() => {
-    console.log('[LiveScoring] stream 状态变化:', {
-      exists: !!stream,
-      trackCount: stream ? stream.getTracks().length : 0,
-      trackDetails: stream ? stream.getTracks().map(t => ({
-        kind: t.kind,
-        id: t.id.slice(0, 12),
-        enabled: t.enabled
-      })) : 'N/A'
-    });
-  }, [stream]);
-
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -144,15 +133,11 @@ const LiveScoring: React.FC = () => {
   const wsManualCloseRef = useRef(false);
   const frameIntervalRef = useRef<number>();
   const fpsIntervalRef = useRef<number>();
-  const musicDelayTimerRef = useRef<number>();
-  const pendingMusicDelayRef = useRef<number>(0);
-  const musicDelayStartedAtRef = useRef<number>(0);
   const startTimeRef = useRef<number>(0);
   const sentFramesRef = useRef<number>(0);
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const liveVideoRef = useRef<HTMLVideoElement | null>(null);
   const standardVideoRef = useRef<HTMLVideoElement | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const initialMusicAppliedRef = useRef(false);
 
   // 保存流，避免组件重新挂载时丢失
@@ -170,24 +155,6 @@ const LiveScoring: React.FC = () => {
     sentFramesRef.current = 0;
   }, []);
 
-  const clearMusicDelayTimer = useCallback(() => {
-    if (musicDelayTimerRef.current) {
-      window.clearTimeout(musicDelayTimerRef.current);
-      musicDelayTimerRef.current = undefined;
-    }
-    musicDelayStartedAtRef.current = 0;
-  }, []);
-
-  const stopAudio = useCallback(() => {
-    clearMusicDelayTimer();
-    pendingMusicDelayRef.current = 0;
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
-    setStats(prev => ({ ...prev, music_playing: false }));
-  }, [clearMusicDelayTimer]);
-
   const stopWebSocket = useCallback(() => {
     if (wsRef.current) {
       wsManualCloseRef.current = true;
@@ -198,18 +165,15 @@ const LiveScoring: React.FC = () => {
   }, []);
 
   const stopSession = useCallback((stopCamera: boolean, reason: string = 'unknown') => {
-    console.log('[stopSession] 调用，参数:', stopCamera, '原因:', reason);
     const currentIsPlaying = isPlayingRef.current;
     const currentIsFullscreen = isFullscreenCompareRef.current;
 
     if (reason === 'cleanup' && currentIsFullscreen && currentIsPlaying) {
-      console.log('[stopSession] 检测进行中，忽略组件重新挂载导致的 cleanup');
       return;
     }
 
     clearFrameLoops();
     stopWebSocket();
-    stopAudio();
 
     if (standardVideoRef.current) {
       standardVideoRef.current.pause();
@@ -228,8 +192,6 @@ const LiveScoring: React.FC = () => {
     setIsFullscreenCompare(false);
     if (reason !== 'cleanup') {
       ignoreNullStreamUpdateRef.current = false;
-    } else {
-      console.log('[stopSession] 组件卸载 cleanup，保持保护标记不重置');
     }
     setShowStatsPanel(true);
     setStats(prev => ({
@@ -239,7 +201,7 @@ const LiveScoring: React.FC = () => {
     setDisplayFps(0);
     setLiveFrameScores([]);
     setSessionStartedAt(null);
-  }, [clearFrameLoops, stopAudio, stopWebSocket, stream, isPaused]);
+  }, [clearFrameLoops, stopWebSocket, stream, isPaused]);
 
   const fetchLiveActions = useCallback(async () => {
     setLoading(true);
@@ -291,12 +253,6 @@ const LiveScoring: React.FC = () => {
       setLoading(false);
     }
   }, [initialActionId, initialVideoId]);
-
-  useEffect(() => {
-    console.log('[全屏状态] isFullscreenCompare 变化:', isFullscreenCompare);
-    console.log('[全屏状态] isPlaying:', isPlaying);
-    console.log('[全屏状态] countdown:', countdown);
-  }, [isFullscreenCompare, isPlaying, countdown]);
 
   useEffect(() => {
     fetchLiveActions();
@@ -390,14 +346,11 @@ const LiveScoring: React.FC = () => {
     const wsBaseUrl = buildWsBaseUrl();
     const wsUrl = `${wsBaseUrl}/ws/live/action/${actionId}?sync_offset_ms=${syncOffsetMs}`;
 
-    console.log('[WebSocket] 正在建立连接:', wsUrl);
-
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     const connectionTimeout = setTimeout(() => {
       if (ws.readyState !== WebSocket.OPEN) {
-        console.error('[WebSocket] 连接超时');
         ws.close();
         setWarning('WebSocket连接超时，请检查网络或后端服务');
       }
@@ -405,7 +358,6 @@ const LiveScoring: React.FC = () => {
 
     ws.onopen = () => {
       clearTimeout(connectionTimeout);
-      console.log('[WebSocket] 连接成功建立');
       setWsConnected(true);
       setWarning('');
     };
@@ -433,18 +385,15 @@ const LiveScoring: React.FC = () => {
             setKeypoints(payload.keypoints);
           }
         } else if (message.type === 'error') {
-          console.error('[WebSocket] 收到错误消息:', message);
           setWarning(message.data?.message || '实时检测出现错误');
         }
       } catch (err) {
-        console.error('[WebSocket] 解析消息失败:', err);
         setWarning('收到无法解析的实时消息');
       }
     };
 
     ws.onerror = (error) => {
       clearTimeout(connectionTimeout);
-      console.error('[WebSocket] 发生错误:', error);
       setWarning('实时连接发生错误');
     };
 
@@ -504,51 +453,18 @@ const LiveScoring: React.FC = () => {
         }));
         sentFramesRef.current += 1;
       } catch (err) {
-        console.error('[帧发送] 错误:', err);
+        // 帧发送错误，静默处理
       }
     }, 50);
   }, [clearFrameLoops]);
 
-  const playAudio = useCallback(() => {
-    if (!audioRef.current) return;
-    audioRef.current.play()
-      .then(() => setStats(prev => ({ ...prev, music_playing: true })))
-      .catch(() => setWarning('音乐播放失败，请检查浏览器媒体权限'));
-  }, []);
-
-  const initAudio = useCallback(() => {
-    if (!selectedMusic) return false;
-
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      audioRef.current = null;
-    }
-
-    const audio = new Audio(getMusicUrl(selectedMusic.music_file_path));
-    audio.volume = stats.music_volume;
-    audio.preload = 'auto';
-    audio.currentTime = 0;
-    audioRef.current = audio;
-    return true;
-  }, [selectedMusic, stats.music_volume]);
-
-  const startMusic = useCallback(() => {
-    if (!audioRef.current) return;
-    playAudio();
-  }, [playAudio]);
-
   const handleStart = useCallback(() => {
-    if (!selectedAction || !selectedAction.video_path || !selectedMusicId || !selectedMusic || !cameraReady || !stream || syncLoading || !selectedSync) {
+    if (!selectedAction || !selectedAction.video_path || !cameraReady || !stream) {
       return;
     }
 
     setError('');
-    if (!selectedSync.is_aligned) {
-      setWarning('当前动作与音乐未完成对齐，已按 0ms（或已保存偏移）继续实时检测。');
-    } else {
-      setWarning('');
-    }
+    setWarning('');
 
     setIsPlaying(false);
     setIsPaused(false);
@@ -567,22 +483,15 @@ const LiveScoring: React.FC = () => {
         setCountdown(null);
 
         ignoreNullStreamUpdateRef.current = true;
-        console.log('[handleStart] 保护标记已设置，准备切换布局');
 
         setIsPlaying(true);
         setIsFullscreenCompare(true);
-        console.log('[handleStart] 倒计时结束，设置全屏模式');
         startTimeRef.current = performance.now();
         setSessionStartedAt(new Date().toISOString());
 
         if (standardVideoRef.current) {
           standardVideoRef.current.pause();
           standardVideoRef.current.currentTime = 0;
-        }
-
-        if (audioRef.current) {
-          audioRef.current.pause();
-          audioRef.current.currentTime = 0;
         }
 
         setTimeout(() => {
@@ -600,193 +509,41 @@ const LiveScoring: React.FC = () => {
               }
 
               if (liveVideo.paused) {
-                liveVideo.play().catch(console.error);
+                liveVideo.play().catch(() => {});
               }
 
               const video = standardVideoRef.current;
-              console.log('[播放控制] 获取标准视频引用:', {
-                videoExists: !!video,
-                videoElementId: video?.id,
-                videoSrc: video?.src,
-                videoWidth: video?.videoWidth,
-                videoHeight: video?.videoHeight,
-                readyState: video?.readyState
-              });
               if (!video) {
-                console.error('[播放控制] 错误：standardVideoRef.current 为空！无法播放视频');
                 setWarning('标准视频元素未找到，请重新加载页面');
                 return;
               }
               video.pause();
               video.currentTime = 0;
 
-              const syncOffsetMs = selectedSync.sync_offset_ms || 0;
+              // 直接播放标准视频（带原声）
+              const playStandardVideo = (retryCount = 0) => {
+                const currentVideo = standardVideoRef.current;
+                if (!currentVideo) {
+                  return;
+                }
 
-              // 先初始化音频（加载但不播放）
-              const audioInitialized = initAudio();
-              if (!audioInitialized) {
-                setWarning('初始化音频失败');
-                return;
-              }
-
-              // 调试日志
-              console.log('[播放控制] 同步偏移量信息:', {
-                syncOffsetMs,
-                type: typeof syncOffsetMs,
-                selectedSync: selectedSync
-              });
-
-              // 根据 sync_offset_ms 决定播放顺序
-              // sync_offset_ms > 0：音乐先播，视频延迟播放（视频晚于音乐）
-              // sync_offset_ms < 0：视频先播，音乐延迟播放（视频早于音乐）
-              // sync_offset_ms == 0：同时开始播放
-
-              if (syncOffsetMs > 0) {
-                // 音乐立即播放，视频延迟
-                console.log('[播放控制] syncOffsetMs > 0，音乐先播，视频延迟', syncOffsetMs, 'ms');
-
-                // 立即播放音乐
-                startMusic();
-
-                // 延迟播放视频
-                setTimeout(() => {
-                  // 使用 current 而不是捕获的 video 变量，确保引用的是当前 DOM 中的视频元素
-                  const playStandardVideo = (retryCount = 0) => {
-                    const currentVideo = standardVideoRef.current;
-                    if (!currentVideo) {
-                      console.error('[播放控制] 延迟触发时无法获取标准视频引用');
-                      return;
-                    }
-
-                    console.log('[播放控制] 延迟触发，检查标准视频状态:', {
-                      elapsedMs: syncOffsetMs,
-                      currentTime: currentVideo.currentTime,
-                      paused: currentVideo.paused,
-                      readyState: currentVideo.readyState,
-                      readyStateStr: ['HAVE_NOTHING', 'HAVE_METADATA', 'HAVE_CURRENT_DATA', 'HAVE_FUTURE_DATA', 'HAVE_ENOUGH_DATA'][currentVideo.readyState] || 'UNKNOWN',
-                      videoWidth: currentVideo.videoWidth,
-                      videoHeight: currentVideo.videoHeight,
-                      videoExists: !!currentVideo.src,
-                      retryCount
-                    });
-
-                    // 重试直到视频尺寸加载完成
-                    if (currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
-                      if (retryCount < 50) {
-                        console.log('[播放控制] 视频尺寸未加载完成，100ms 后重试...');
-                        setTimeout(() => playStandardVideo(retryCount + 1), 100);
-                        return;
-                      } else {
-                        console.error('[播放控制] 视频尺寸加载超时，强制播放');
-                      }
-                    }
-
-                    // 直接播放视频（不设置 currentTime）
-                    currentVideo.play().then(() => {
-                      console.log('[播放控制] 标准视频播放成功，当前时间:', currentVideo.currentTime);
-                    }).catch((err) => {
-                      console.error('[播放控制] 标准动作视频播放失败:', {
-                        name: err.name,
-                        message: err.message
-                      });
-                      setWarning('标准动作视频播放失败，请重试');
-                    });
-                  };
-                  playStandardVideo();
-                }, syncOffsetMs);
-
-              } else if (syncOffsetMs < 0) {
-                // 视频立即播放，音乐延迟
-                const musicDelayMs = Math.abs(syncOffsetMs);
-                console.log('[播放控制] syncOffsetMs < 0，视频先播，音乐延迟', musicDelayMs, 'ms');
-
-                // 等待视频加载完成后播放
-                const playStandardVideo = (retryCount = 0) => {
-                  const currentVideo = standardVideoRef.current;
-                  if (!currentVideo) {
-                    console.error('[播放控制] 无法获取标准视频引用');
+                // 重试直到视频尺寸加载完成
+                if (currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
+                  if (retryCount < 50) {
+                    setTimeout(() => playStandardVideo(retryCount + 1), 100);
                     return;
-                  }
-
-                  if (currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
-                    if (retryCount < 50) {
-                      setTimeout(() => playStandardVideo(retryCount + 1), 100);
-                      return;
-                    }
-                  }
-
-                  currentVideo.currentTime = 0;
-                  currentVideo.play().catch(() => {
-                    setWarning('标准动作视频播放失败，请重试');
-                  });
-                  console.log('[播放控制] 标准视频立即播放');
-
-                  // 延迟后播放音乐
-                  setTimeout(() => {
-                    startMusic();
-                    console.log('[播放控制] 音乐开始播放（延迟后）');
-                  }, musicDelayMs);
-                };
-
-                const video = standardVideoRef.current;
-                if (video) {
-                  // 添加事件监听器确保视频加载完成
-                  const onLoaded = () => {
-                    video.removeEventListener('loadedmetadata', onLoaded);
-                    video.removeEventListener('canplay', onLoaded);
-                    playStandardVideo();
-                  };
-                  video.addEventListener('loadedmetadata', onLoaded);
-                  video.addEventListener('canplay', onLoaded);
-                  // 如果视频已经加载，直接播放
-                  if (video.videoWidth > 0) {
-                    playStandardVideo();
                   }
                 }
 
-              } else {
-                // 偏移量为0，同时播放
-                console.log('[播放控制] syncOffsetMs == 0，同时开始播放');
-                startMusic();
+                // 直接播放视频（带原声）
+                currentVideo.play().catch(() => {
+                  setWarning('标准动作视频播放失败，请重试');
+                });
+              };
+              playStandardVideo();
 
-                // 等待视频加载完成后播放
-                const playStandardVideo = (retryCount = 0) => {
-                  const currentVideo = standardVideoRef.current;
-                  if (!currentVideo) {
-                    console.error('[播放控制] 无法获取标准视频引用');
-                    return;
-                  }
-
-                  if (currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
-                    if (retryCount < 50) {
-                      setTimeout(() => playStandardVideo(retryCount + 1), 100);
-                      return;
-                    }
-                  }
-
-                  currentVideo.currentTime = 0;
-                  currentVideo.play().catch(() => {
-                    setWarning('标准动作视频播放失败，请重试');
-                  });
-                  console.log('[播放控制] 标准视频开始播放（同步）');
-                };
-
-                const video = standardVideoRef.current;
-                if (video) {
-                  const onLoaded = () => {
-                    video.removeEventListener('loadedmetadata', onLoaded);
-                    video.removeEventListener('canplay', onLoaded);
-                    playStandardVideo();
-                  };
-                  video.addEventListener('loadedmetadata', onLoaded);
-                  video.addEventListener('canplay', onLoaded);
-                  if (video.videoWidth > 0) {
-                    playStandardVideo();
-                  }
-                }
-              }
-
-              connectWebSocket(selectedAction.id, syncOffsetMs);
+              // WebSocket 连接不需要 sync_offset_ms
+              connectWebSocket(selectedAction.id, 0);
               startFrameLoop();
             } else if (attempts < 30) {
               setTimeout(() => checkRefs(attempts + 1), 50);
@@ -807,15 +564,8 @@ const LiveScoring: React.FC = () => {
     cameraReady,
     connectWebSocket,
     selectedAction,
-    selectedMusic,
-    selectedMusicId,
-    selectedSync,
     startFrameLoop,
-    initAudio,
     stream,
-    syncLoading,
-    startMusic,
-    playAudio,
   ]);
 
   const handleTogglePause = useCallback(() => {
@@ -828,10 +578,6 @@ const LiveScoring: React.FC = () => {
       if (standardVideoRef.current) {
         standardVideoRef.current.play().catch(() => {});
       }
-
-      if (audioRef.current) {
-        playAudio();
-      }
       return;
     }
 
@@ -841,15 +587,9 @@ const LiveScoring: React.FC = () => {
     if (standardVideoRef.current) {
       standardVideoRef.current.pause();
     }
-
-    if (audioRef.current) {
-      audioRef.current.pause();
-      setStats(prev => ({ ...prev, music_playing: false }));
-    }
-  }, [clearFrameLoops, isPaused, isPlaying, playAudio, startFrameLoop]);
+  }, [clearFrameLoops, isPaused, isPlaying, startFrameLoop]);
 
   const handleStop = useCallback(async () => {
-    console.log('[handleStop] 停止按钮被点击');
     if (isPlaying && selectedAction) {
       const endedAt = new Date().toISOString();
       const startedAt = sessionStartedAt || endedAt;
@@ -984,18 +724,8 @@ const LiveScoring: React.FC = () => {
   };
 
   const handleStreamReady = useCallback((newStream: MediaStream | null) => {
-    console.log('[handleStreamReady] 摄像头流状态变化:', {
-      streamExists: !!newStream,
-      isPlaying,
-      isFullscreenCompare,
-      currentStream: !!stream,
-      persistedStream: !!persistedStreamRef.current,
-      ignoreNullStreamUpdate: ignoreNullStreamUpdateRef.current
-    });
-
     if ((isPlaying && isFullscreenCompare) || ignoreNullStreamUpdateRef.current) {
       if (newStream === null && stream !== null) {
-        console.log('[handleStreamReady] 检测进行中，忽略布局切换导致的流状态变化');
         return;
       }
     }
@@ -1011,12 +741,10 @@ const LiveScoring: React.FC = () => {
   const handleVolumeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const volume = Number(event.target.value);
     setStats(prev => ({ ...prev, music_volume: volume }));
-    if (audioRef.current) {
-      audioRef.current.volume = volume;
-    }
+    // 音量控制用于标准视频（通过 LiveVideoPanel 组件）
   };
 
-  const canStart = Boolean(selectedAction && selectedMusic && cameraReady && !syncLoading && modelLoaded);
+  const canStart = Boolean(selectedAction && cameraReady && modelLoaded);
 
   if (loading) {
     return (
@@ -1099,7 +827,7 @@ const LiveScoring: React.FC = () => {
   }
 
   return (
-    <div className={`min-h-screen bg-slate-900 flex flex-col ${isFullscreenCompare ? 'fixed inset-0 z-50' : ''}`}>
+    <div className={`bg-slate-900 flex flex-col ${isFullscreenCompare ? 'fixed inset-0 z-50 h-screen' : ''}`}>
       {/* header - 常规模式显示 */}
       {!isFullscreenCompare && (
         <header className="bg-slate-800 border-b border-slate-700 px-6 py-4">
@@ -1112,7 +840,15 @@ const LiveScoring: React.FC = () => {
                 <h1 className="text-xl font-bold text-white">实时检测 - {selectedAction.name}</h1>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-4">
+              <div className="w-64">
+                <CameraSelector
+                  onDeviceChange={setSelectedCamera}
+                  selectedDeviceId={selectedCamera}
+                  onStreamReady={handleStreamReady}
+                  disabled={isPlaying}
+                />
+              </div>
               {!isPlaying ? (
                 <button onClick={handleStart} disabled={!canStart} className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 disabled:opacity-50">
                   <Play size={18} /> 开始检测
@@ -1133,7 +869,7 @@ const LiveScoring: React.FC = () => {
         </header>
       )}
 
-      <div className={`flex-1 ${isFullscreenCompare ? 'flex flex-col overflow-hidden' : 'p-6'}`}>
+      <div className={`flex-1 flex flex-col ${isFullscreenCompare ? 'overflow-hidden' : 'p-3'}`}>
         {/* 倒计时覆盖层 */}
         {countdown !== null && (
           <div className="absolute inset-0 flex items-center justify-center z-50 bg-slate-900/80 backdrop-blur-sm">
@@ -1219,8 +955,8 @@ const LiveScoring: React.FC = () => {
               />
             </div>
           </div>
-          <div className="flex-1 grid grid-cols-2 gap-0">
-            <div className="relative border-r border-slate-700">
+          <div className="flex-1 grid grid-cols-2 gap-0 min-h-0">
+            <div className="relative border-r border-slate-700 h-full">
               <LiveVideoPanel
                 key="standard-video-panel"
                 videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
@@ -1228,12 +964,13 @@ const LiveScoring: React.FC = () => {
                 title="标准动作"
                 isActive={isPlaying && !isPaused}
                 showSkeleton={false}
-                className="h-full"
-                muted
+                className="h-full w-full rounded-none"
                 loop
+                muted={false}
+                volume={stats.music_volume}
               />
             </div>
-            <div className="relative">
+            <div className="relative h-full">
               <LiveVideoPanel
                 key="live-video-panel"
                 stream={stream || persistedStreamRef.current || undefined}
@@ -1243,7 +980,7 @@ const LiveScoring: React.FC = () => {
                 score={stats.current_score > 0 ? stats.current_score : undefined}
                 keypoints={keypoints}
                 showSkeleton
-                className="h-full"
+                className="h-full w-full rounded-none"
                 muted
               />
             </div>
@@ -1252,124 +989,118 @@ const LiveScoring: React.FC = () => {
         )}
 
         {!isFullscreenCompare && (
-          <div className={`h-full grid grid-rows-2 gap-4 ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
-            <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col h-full">
-              <LiveVideoPanel
-                key="standard-video-panel"
-                videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
-                videoRef={standardVideoRef}
-                title="标准动作"
-                isActive={isPlaying && !isPaused}
-                showSkeleton={false}
-                className="h-full"
-                muted
-                loop
-              />
-            </div>
-            <div className="flex flex-col h-full">
-              <LiveVideoPanel
-                key="live-video-panel"
-                stream={stream || persistedStreamRef.current || undefined}
-                videoRef={liveVideoRef}
-                title="实时画面"
-                isActive={cameraReady}
-                score={stats.current_score > 0 ? stats.current_score : undefined}
-                keypoints={keypoints}
-                showSkeleton
-                className="h-full"
-                muted
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
-              <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                <Music2 size={18} className="text-indigo-400" /> 选择音乐
-              </h3>
-              <div className="space-y-2 flex-1 overflow-auto">
-                {actionMusicList.map((item) => (
-                  <button
-                    key={item.music_id}
-                    onClick={() => handleMusicSelect(item.music_id)}
-                    disabled={isPlaying}
-                    className={`w-full text-left px-3 py-2 rounded-lg border transition-all ${
-                      selectedMusicId === item.music_id
-                        ? 'bg-indigo-500/20 border-indigo-400 text-white'
-                        : 'bg-slate-700/40 border-slate-600 text-slate-200 hover:border-indigo-300'
-                    } disabled:opacity-50`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium truncate">{item.music_name}</span>
-                      <span className={`text-xs shrink-0 ${item.is_aligned ? 'text-green-300' : 'text-amber-300'}`}>
-                        {item.is_aligned ? '已对齐' : '未对齐'}
-                      </span>
-                    </div>
-                  </button>
-                ))}
+          <div className={`flex flex-col gap-4 ${countdown !== null ? 'opacity-30 pointer-events-none' : ''}`}>
+            <div className="grid grid-cols-2 gap-4 items-start">
+              <div className="flex flex-col bg-slate-800 rounded-2xl p-3 shadow-lg border border-slate-700">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-white font-semibold flex items-center gap-2">
+                    <Target size={18} className="text-indigo-400" />
+                    标准动作
+                  </h3>
+                </div>
+                <div className="relative w-full aspect-video max-h-[41vh] rounded-xl overflow-hidden bg-black mx-auto">
+                  <LiveVideoPanel
+                    key="standard-video-panel"
+                    videoSrc={selectedAction.video_path ? getVideoUrl(selectedAction.video_path) : undefined}
+                    videoRef={standardVideoRef}
+                    title=""
+                    isActive={isPlaying && !isPaused}
+                    showSkeleton={false}
+                    className="absolute inset-0 w-full h-full rounded-none"
+                    loop
+                    muted={false}
+                    volume={stats.music_volume}
+                    fitMode="cover"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col bg-slate-800 rounded-2xl p-3 shadow-lg border border-slate-700">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-white font-semibold flex items-center gap-2">
+                    <Camera size={18} className="text-green-400" />
+                    实时画面
+                  </h3>
+                </div>
+                <div className="relative w-full aspect-video max-h-[41vh] rounded-xl overflow-hidden bg-black mx-auto">
+                  <LiveVideoPanel
+                    key="live-video-panel"
+                    stream={stream || persistedStreamRef.current || undefined}
+                    videoRef={liveVideoRef}
+                    title=""
+                    isActive={cameraReady}
+                    score={undefined} // 分数移到外层显示
+                    keypoints={keypoints}
+                    showSkeleton
+                    className="absolute inset-0 w-full h-full rounded-none"
+                    muted
+                    fitMode="cover"
+                  />
+                </div>
               </div>
             </div>
-            <div className="flex flex-col h-full min-h-0">
-              <CameraSelector
-                onDeviceChange={setSelectedCamera}
-                selectedDeviceId={selectedCamera}
-                onStreamReady={handleStreamReady}
-                disabled={isPlaying}
-              />
-            </div>
-            <div className="bg-slate-800 rounded-2xl p-4 flex flex-col min-h-0">
-              <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                <Music2 size={18} className="text-indigo-400" /> 音乐控制 / 对齐信息
-              </h3>
-              {syncLoading ? (
-                <div className="text-slate-400 text-sm py-4">加载对齐配置...</div>
-              ) : selectedSync ? (
-                <div className="space-y-3">
-                  {selectedMusic && (
-                    <p className="text-slate-200 text-sm truncate">{selectedMusic.music_name}</p>
-                  )}
-                  <div className={`p-2 rounded-lg ${selectedSync.is_aligned ? 'bg-green-500/10 border border-green-500/20' : 'bg-amber-500/10 border border-amber-500/20'}`}>
-                    <div className="flex items-center gap-2 mb-1">
-                      {selectedSync.is_aligned ? <CheckCircle2 size={14} className="text-green-400" /> : <AlertCircle size={14} className="text-amber-400" />}
-                      <span className={`text-xs font-medium ${selectedSync.is_aligned ? 'text-green-400' : 'text-amber-400'}`}>
-                        {selectedSync.is_aligned ? '已对齐' : '未对齐'}
+
+            <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-lg p-4 min-h-[220px]">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-2 bg-slate-700/35 border border-slate-600/40 rounded-xl p-4 h-full">
+                  <h4 className="text-white font-semibold mb-2">预览说明</h4>
+                  <p className="text-slate-300 text-sm leading-6">
+                    当前页面用于开始前预览：左侧为标准动作视频，右侧为实时摄像头画面。确认构图、角度和光线后，点击右上角“开始检测”进入正式检测。
+                  </p>
+                </div>
+                <div className="bg-slate-700/35 border border-slate-600/40 rounded-xl p-4 h-full">
+                  <h4 className="text-white font-semibold mb-2">开始前检查</h4>
+                  <ul className="text-slate-300 text-sm space-y-1.5">
+                    <li>• 人体尽量完整出现在画面中</li>
+                    <li>• 摄像头高度与胸口齐平</li>
+                    <li>• 环境光线充足且稳定</li>
+                    <li>• 标准动作视频可正常播放</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-slate-700/35 border border-slate-600/40 rounded-xl p-4">
+                  <h4 className="text-white font-semibold mb-3">当前准备状态</h4>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2">
+                      <span className="text-slate-300">标准视频</span>
+                      <span className={`font-medium ${selectedAction.video_path ? 'text-green-400' : 'text-amber-400'}`}>
+                        {selectedAction.video_path ? '已就绪' : '缺失'}
                       </span>
                     </div>
-                    <div className="text-xs text-slate-400">
-                      同步偏移: {selectedSync.sync_offset_ms}ms
-                      <br />
-                      <span className="text-slate-500">
-                        {selectedSync.sync_offset_ms > 0 ? `视频延迟 ${(selectedSync.sync_offset_ms / 1000).toFixed(2)} 秒播放` :
-                         selectedSync.sync_offset_ms < 0 ? `视频提前 ${Math.abs(selectedSync.sync_offset_ms / 1000).toFixed(2)} 秒播放` :
-                         '视频和音乐同时开始'}
+                    <div className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2">
+                      <span className="text-slate-300">摄像头</span>
+                      <span className={`font-medium ${selectedCamera ? 'text-green-400' : 'text-amber-400'}`}>
+                        {selectedCamera ? '已选择' : '未选择'}
                       </span>
                     </div>
-                  </div>
-                  {selectedSync.alignment_note && (
-                    <div className="text-xs text-slate-400 bg-slate-700/30 p-2 rounded">
-                      <span className="text-slate-500">备注: </span>
-                      {selectedSync.alignment_note}
+                    <div className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2">
+                      <span className="text-slate-300">实时画面</span>
+                      <span className={`font-medium ${cameraReady ? 'text-green-400' : 'text-slate-400'}`}>
+                        {cameraReady ? '可用' : '等待中'}
+                      </span>
                     </div>
-                  )}
-                  <button
-                    onClick={goToSyncAlign}
-                    disabled={isPlaying}
-                    className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
-                  >
-                    <Settings size={14} />
-                    对齐设置
-                  </button>
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400 text-xs">音量</span>
-                    <input type="range" min="0" max="1" step="0.1" value={stats.music_volume} onChange={handleVolumeChange} className="flex-1 accent-indigo-500" />
+                    <div className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2">
+                      <span className="text-slate-300">启动条件</span>
+                      <span className={`font-medium ${canStart ? 'text-green-400' : 'text-amber-400'}`}>
+                        {canStart ? '满足' : '未满足'}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              ) : (
-                <p className="text-amber-300 text-sm">请选择音乐查看对齐信息</p>
-              )}
+
+                <div className="bg-slate-700/35 border border-slate-600/40 rounded-xl p-4">
+                  <h4 className="text-white font-semibold mb-3">检测流程</h4>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="bg-slate-800/50 rounded-lg px-3 py-2 text-slate-200">1. 预览与构图确认</div>
+                    <div className="bg-slate-800/50 rounded-lg px-3 py-2 text-slate-200">2. 点击开始检测</div>
+                    <div className="bg-slate-800/50 rounded-lg px-3 py-2 text-slate-200">3. 实时动作对比</div>
+                    <div className="bg-slate-800/50 rounded-lg px-3 py-2 text-slate-200">4. 结束并查看结果</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
         )}
 
         {(error || warning) && !isFullscreenCompare && (

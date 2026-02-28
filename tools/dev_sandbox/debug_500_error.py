@@ -66,7 +66,7 @@ async def debug_posture_request():
         async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
             print("2. 发送调试请求...")
             response = await client.post(
-                'http://localhost:8889/posture/assess',
+                'http://localhost:8000/posture/assess',
                 files=files,
                 data=data
             )

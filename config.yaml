@@ -17,7 +17,7 @@ security:
 database:
   # 数据库连接字符串
   # 格式: mysql+pymysql://username:password@host:port/database_name
-  url: "mysql+pymysql://root:123456@localhost:3306/aipe_db"
+  url: "mysql+pymysql://root:123456@localhost:3307/aipe_db"
 
 # =============================================================================
 # AI 服务配置
@@ -26,7 +26,7 @@ ai:
   # 是否启用 Mock 模式
   # True: 返回随机关键点数据 (用于测试)
   # False: 使用真实 YOLOv8 Pose 模型识别
-  use_mock: true
+  use_mock: false
   
   # YOLO 模型路径 (支持相对路径和绝对路径)
   # 支持的模型: yolov8n-pose.pt, yolov8s-pose.pt, yolov8m-pose.pt 等

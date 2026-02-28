@@ -133,7 +133,7 @@ class PostureIssue(Base):
     severity_levels = Column(JSON, nullable=True)                # 严重程度分级数据
 
     # 评分权重
-    weight_score = Column(DECIMAL(3, 2), default=10.00)          # 在总分中的权重
+    weight_score = Column(DECIMAL(5, 2), default=10.00)          # 在总分中的权重
 
     # 建议信息
     recommendations = Column(TEXT, nullable=True)                # 改善建议

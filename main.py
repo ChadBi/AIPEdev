@@ -11,7 +11,6 @@ from api import auth, user, action, video, recognize, score, music, sync_config,
 from api.websocket import router as ws_router
 from core.config import UPLOAD_DIR
 
-logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -94,3 +93,14 @@ app.include_router(posture.router, prefix="/posture", tags=["体态检测模块"
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "message": "AI 体育教学系统运行正常"}
+
+
+if __name__ == "__main__":
+    # 从配置文件读取服务器配置
+    uvicorn.run(
+        "main:app",
+        host=SERVER_HOST,
+        port=SERVER_PORT,
+        reload=SERVER_RELOAD,
+        log_level=SERVER_LOG_LEVEL,
+    )

@@ -67,4 +67,5 @@ MAX_FILE_SIZE = _CONFIG.get("file_storage", {}).get("max_file_size", 524288000)
 # =============================================================================
 SERVER_HOST = _CONFIG.get("server", {}).get("host", "127.0.0.1")
 SERVER_PORT = _CONFIG.get("server", {}).get("port", 8000)
-LOG_LEVEL = _CONFIG.get("server", {}).get("log_level", "info")
+SERVER_RELOAD = _CONFIG.get("server", {}).get("reload", True)
+SERVER_LOG_LEVEL = _CONFIG.get("server", {}).get("log_level", "info")

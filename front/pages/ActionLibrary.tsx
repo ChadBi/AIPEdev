@@ -17,7 +17,7 @@ const ActionLibrary: React.FC = () => {
       const res = await api.get('/actions/');
       setActions(res.data);
     } catch (err) {
-      console.error(err);
+      setActions([]);
     } finally {
       setLoading(false);
     }
